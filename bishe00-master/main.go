@@ -3272,26 +3272,26 @@ func aiAutoScanHandler(w http.ResponseWriter, r *http.Request) {
 				// 只有在明确表示"扫描完成"或"分析完成"且没有发现漏洞时才结束
 				shouldEnd := false
 				responseLower := strings.ToLower(response)
-				
+
 				// 如果AI明确表示完成，且不是在描述漏洞或生成EXP
-				if (strings.Contains(responseLower, "扫描完成") || 
-				    strings.Contains(responseLower, "分析完成") ||
-				    strings.Contains(responseLower, "检测完成")) &&
-				   !strings.Contains(responseLower, "漏洞") &&
-				   !strings.Contains(responseLower, "exp") &&
-				   !strings.Contains(responseLower, "exploit") {
+				if (strings.Contains(responseLower, "扫描完成") ||
+					strings.Contains(responseLower, "分析完成") ||
+					strings.Contains(responseLower, "检测完成")) &&
+					!strings.Contains(responseLower, "漏洞") &&
+					!strings.Contains(responseLower, "exp") &&
+					!strings.Contains(responseLower, "exploit") {
 					shouldEnd = true
 				}
-				
+
 				// 如果AI返回的是漏洞分析或EXP代码，不要结束
 				if strings.Contains(responseLower, "漏洞描述") ||
-				   strings.Contains(responseLower, "exp代码") ||
-				   strings.Contains(responseLower, "exploit") ||
-				   strings.Contains(responseLower, "```python") ||
-				   strings.Contains(responseLower, "风险等级") {
+					strings.Contains(responseLower, "exp代码") ||
+					strings.Contains(responseLower, "exploit") ||
+					strings.Contains(responseLower, "```python") ||
+					strings.Contains(responseLower, "风险等级") {
 					shouldEnd = false
 				}
-				
+
 				if shouldEnd {
 					log.Printf("[INFO] AI表示扫描完成，准备生成最终报告")
 					break
@@ -4905,23 +4905,70 @@ func runAIAnalysisInternal(provider, apiKey, baseURL, model string, reportData m
 		return ""
 	}
 
-	// 构造消息（输出纯文本，不使用Markdown）
+	// 构造消息（输出结构化文本报告）
 	var systemPrompt string
 	if stepName == "最终报告" || stepName == "综合扫描" {
-		systemPrompt = `你是一位专业的安全分析专家。请对扫描结果进行全面分析，输出纯文本分析报告。
+		systemPrompt = `你是一位专业的安全分析专家。请对扫描结果进行全面分析，生成一份详细的结构化安全报告。
+
+报告必须包含以下部分，使用指定格式输出：
+
+【一、执行摘要】
+简要概述扫描目标、发现的漏洞总数、风险等级等核心信息。
+
+【二、端口开放情况】
+对于每个开放的端口：
+- 端口号/协议
+- 识别到的服务指纹（如有）
+- 推测服务（如未识别到指纹，根据端口号推测，如 22->SSH, 80->HTTP 等）
+- 该服务可能存在的安全风险
+
+【三、敏感目录泄露】
+对于发现的每个敏感目录或文件：
+- 目录/文件路径
+- HTTP状态码
+- 可能存在的信息泄露风险（如 .git/config, /admin/, /phpmyadmin/ 等）
+
+【四、漏洞详情】
+对于 POC 扫描发现的每个漏洞：
+- 漏洞名称
+- 漏洞类型（SQL注入、XSS、RCE等）
+- 详细描述（漏洞形成原因、利用条件等）
+- 危害等级（高危/中危/低危）
+- 漏洞利用示例或POC
+
+【五、EXP代码（如有）】
+如有成功生成EXP：
+- 漏洞名称
+- EXP代码（完整可执行代码）
+- 使用说明（参数说明、使用示例）
+
+【六、风险修复建议】
+按优先级排列所有发现的安全风险修复方案，格式：
+[高优先级] 风险名称
+- 修复方法：具体操作步骤
+- 修复原因：为什么必须修复
+---
+[中优先级] 风险名称
+- 修复方法：...
+- 修复原因：...
+---
+[低优先级] 风险名称
+- 修复方法：...
+- 修复原因：...
+
+【七、整体安全建议】
+提供总体安全加固建议。
 
 要求：
-1. 输出纯文本，不要使用Markdown格式
-2. 包含以下部分：
-   - 执行摘要（简要概述）
-   - 关键发现（列出重要发现）
-   - 风险评估（按严重程度分类）
-   - 修复建议（针对性的修复措施）
-3. 使用中文输出
-4. 只输出用户需要了解的信息，不要输出"根据提供的扫描报告"等冗余说明
-5. 换行使用实际换行，不要使用\n转义字符
+1. 使用中文输出
+2. 严格按上述格式输出，不要使用 Markdown
+3. 每个部分使用【】包裹标题
+4. 风险等级必须标注清楚（高危/中危/低危）
+5. 修复建议必须解释原因
+6. 只输出用户需要了解的信息，不要输出"根据提供的扫描报告"等冗余说明
+7. 换行使用实际换行，不要使用\n转义字符
 
-请直接输出分析结果，不要包含任何解释性文字或元数据。`
+请直接生成完整的结构化报告。`
 	} else {
 		systemPrompt = fmt.Sprintf(`你是一位专业的安全分析专家。请对%s的扫描结果进行简要分析。
 

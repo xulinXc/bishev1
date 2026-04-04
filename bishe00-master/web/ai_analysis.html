@@ -1454,7 +1454,7 @@
 
     /**
      * 导出AI分析报告为Markdown格式
-     * 注意：只导出AI分析总结，不包含扫描过程数据
+     * 优化版：支持结构化报告格式
      */
     function exportAIAnalysisReport() {
       if (allAIContent.length === 0) {
@@ -1463,21 +1463,50 @@
       }
 
       const lines = [];
-      lines.push('# AI 安全分析报告');
+      lines.push('# 安全分析报告');
       lines.push('');
-      lines.push(`生成时间: ${new Date().toLocaleString('zh-CN')}`);
+      lines.push(`**生成时间：** ${new Date().toLocaleString('zh-CN')}`);
       lines.push('');
 
       // 遍历所有AI分析内容
       allAIContent.forEach((item, index) => {
-        lines.push(`## ${item.step || `步骤 ${index + 1}`}`);
-        lines.push('');
+        const stepName = item.step || `步骤 ${index + 1}`;
         
-        // 处理内容，保持格式
-        const contentLines = item.content.split('\n');
-        contentLines.forEach(line => {
-          lines.push(line);
-        });
+        // 检查是否是AI分析报告主内容
+        if (stepName === 'AI安全分析报告' || stepName === '最终总结') {
+          lines.push('---');
+          lines.push('');
+          // 处理结构化内容
+          let content = item.content;
+          
+          // 将【】标题转换为 Markdown 二级标题
+          content = content.replace(/【([^】]+)】/g, '\n## $1\n');
+          
+          // 处理EXP代码块（如果AI返回了代码）
+          // 识别Python代码并用```python包裹
+          const codeBlockRegex = /(漏洞名称：.*?(?=漏洞名称：|【|$))/gs;
+          content = content.replace(codeBlockRegex, (match) => {
+            return match;
+          });
+          
+          lines.push(content);
+        } else if (stepName.indexOf('Python利用脚本') !== -1) {
+          // Python脚本单独处理
+          lines.push('---');
+          lines.push('');
+          lines.push(`## ${stepName}`);
+          lines.push('');
+          lines.push('```python');
+          lines.push(item.content);
+          lines.push('```');
+        } else {
+          // 其他内容
+          lines.push('---');
+          lines.push('');
+          lines.push(`## ${stepName}`);
+          lines.push('');
+          lines.push(item.content);
+        }
         
         lines.push('');
       });
@@ -1488,13 +1517,13 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `ai-analysis-report-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.md`;
+      a.download = `security-report-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.md`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       
-      console.log('[导出] AI分析报告已导出');
+      console.log('[导出] 安全分析报告已导出');
     }
 
     // 监听AI提供商变化，显示/隐藏DeepSeek模型选择
