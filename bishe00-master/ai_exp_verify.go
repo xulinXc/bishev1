@@ -694,6 +694,40 @@ func analyzeFailure(result ExpVerifyResult, category VulnCategory, log func(stri
 func buildCorrectionPrompt(expSpec ExpSpec, currentCode, failureReason string, category VulnCategory, testCmd string, result ExpVerifyResult, log func(string, ...interface{})) string {
 	var prompt strings.Builder
 
+	// 检测 currentCode 是否包含字符间引号问题
+	hasInterleavedQuotes := hasCharInterleavedQuotes(currentCode)
+
+	if hasInterleavedQuotes {
+		// 如果代码有字符间引号问题，重新生成完整代码
+		prompt.WriteString("请重新生成完整的Python EXP代码。\n\n")
+		prompt.WriteString(fmt.Sprintf("漏洞类型: %s\n", category))
+		prompt.WriteString(fmt.Sprintf("测试命令: %s\n\n", testCmd))
+
+		prompt.WriteString("EXP规范:\n")
+		prompt.WriteString(fmt.Sprintf("- 名称: %s\n", expSpec.Name))
+		prompt.WriteString(fmt.Sprintf("- 利用建议: %s\n", expSpec.ExploitSuggestion))
+		if len(expSpec.Steps) > 0 {
+			prompt.WriteString(fmt.Sprintf("- 步骤数: %d\n", len(expSpec.Steps)))
+			for i, step := range expSpec.Steps {
+				prompt.WriteString(fmt.Sprintf("  步骤%d: %s %s\n", i+1, step.Method, step.Path))
+				if step.Body != "" {
+					prompt.WriteString(fmt.Sprintf("    Body: %s\n", step.Body))
+				}
+			}
+		}
+
+		prompt.WriteString("\n=== 重要说明 ===\n")
+		prompt.WriteString("之前的代码有严重问题：每个字符被引号分隔，如 \"i\"m\"p\"o\"r\"t\" 是完全错误的！\n")
+		prompt.WriteString("请生成完整的新代码，绝对不要使用这种格式。\n\n")
+
+		prompt.WriteString("=== 生成要求 ===\n")
+		prompt.WriteString("1. 只输出完整的Python代码，不要任何解释或markdown标记\n")
+		prompt.WriteString("2. 代码中所有字符串使用英文双引号 \"，绝对不要将每个字符用引号分隔\n")
+		prompt.WriteString("3. 代码必须是可以直接运行的完整脚本\n\n")
+
+		return prompt.String()
+	}
+
 	prompt.WriteString("请修正以下Python EXP代码中的问题。\n\n")
 	prompt.WriteString(fmt.Sprintf("漏洞类型: %s\n", category))
 	prompt.WriteString(fmt.Sprintf("测试命令: %s\n\n", testCmd))
@@ -1062,6 +1096,29 @@ func requestExpCorrection(provider mcp.AIProvider, prompt string, log func(strin
 
 	log("[修正] 收到修正版本，长度: %d 字符", len(code))
 	return code
+}
+
+// hasCharInterleavedQuotes 检测字符串是否包含字符间引号问题
+// 例如: "i"m"p"o"r"t" 这样的格式
+func hasCharInterleavedQuotes(s string) bool {
+	quoteCount := strings.Count(s, "\"")
+
+	// 如果引号数量超过字符串长度的30%，可能有字符间引号问题
+	if len(s) > 0 && quoteCount > len(s)/3 {
+		// 进一步检查：计算非空白、非引号字符数量
+		nonQuoteChars := 0
+		for _, c := range s {
+			if c != '"' && c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+				nonQuoteChars++
+			}
+		}
+		// 如果引号数量与非空白字符数量的比例超过 0.5，认为有问题
+		if nonQuoteChars > 0 && float64(quoteCount)/float64(nonQuoteChars) > 0.5 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func min(a, b int) int {
