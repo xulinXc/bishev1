@@ -112,36 +112,43 @@ func newAIProvider(providerName, apiKey, baseURL, model string, timeoutSec ...in
 
 func stripCodeFence(s string) string {
 	original := s
+	fmt.Printf("[stripCodeFence] 原始内容长度: %d\n", len(original))
+
 	s = strings.TrimSpace(s)
 
-	// 记录原始长度用于调试
-	debugLog := func(msg string) {
-		fmt.Printf("[stripCodeFence] %s (原始长度: %d, 处理后长度: %d)\n", msg, len(original), len(s))
-	}
-
-	// 去除 markdown 代码围栏
+	// 去除 markdown 代码围栏 ```python ... ```
 	if strings.HasPrefix(s, "```") {
 		lines := strings.Split(s, "\n")
 		if len(lines) >= 2 {
-			// 第一行是 ```python 或 ```，跳过
+			// 找到第一行和最后一行
 			firstLine := strings.TrimSpace(lines[0])
-			if len(lines) >= 3 && (firstLine == "```" || strings.HasPrefix(firstLine, "```python") || strings.HasPrefix(firstLine, "```py")) {
+			lastLine := strings.TrimSpace(lines[len(lines)-1])
+
+			// 如果第一行是 ```python 或 ```py，跳过第一行
+			if firstLine == "```" || strings.HasPrefix(firstLine, "```python") || strings.HasPrefix(firstLine, "```py") {
 				lines = lines[1:]
 			}
-			// 最后一行可能是 ```
-			lastIdx := len(lines) - 1
-			if lastIdx > 0 && strings.TrimSpace(lines[lastIdx]) == "```" {
-				lines = lines[:lastIdx]
+
+			// 如果最后一行是 ```，跳过最后一行
+			if lastLine == "```" {
+				lines = lines[:len(lines)-1]
 			}
+
 			s = strings.TrimSpace(strings.Join(lines, "\n"))
 		}
-		debugLog("去除markdown围栏后")
+		fmt.Printf("[stripCodeFence] 去除围栏后长度: %d\n", len(s))
 	}
 
-	// 如果整个字符串被一对双引号包裹，去掉它们
-	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") && !strings.Contains(s[1:len(s)-1], "\"") {
-		s = s[1 : len(s)-1]
-		debugLog("去除外部引号后")
+	// 如果整个字符串被一对双引号包裹（可能是AI返回时被包装了），去掉它们
+	// 检查条件：开头是 "，结尾是 "，且内部没有独立的 "
+	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") {
+		// 统计内部双引号数量
+		inner := s[1 : len(s)-1]
+		quoteCount := strings.Count(inner, "\"")
+		if quoteCount == 0 {
+			s = inner
+			fmt.Printf("[stripCodeFence] 去除外部引号后长度: %d\n", len(s))
+		}
 	}
 
 	// 替换中文引号为英文引号
@@ -152,34 +159,31 @@ func stripCodeFence(s string) string {
 		"'", "'",
 	).Replace(s)
 
-	// 去除任何残留的 markdown 或解释性文本
+	// 逐行处理
 	lines := strings.Split(s, "\n")
 	resultLines := make([]string, 0)
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// 如果这行是空的，跳过
+		// 跳过空行
 		if trimmed == "" {
 			continue
 		}
 
-		// 如果这行只是 Markdown 标记（如 **, ##, -, * 等），跳过
+		// 跳过 Markdown 标题行
 		if strings.HasPrefix(trimmed, "**") && strings.HasSuffix(trimmed, "**") {
 			continue
 		}
 		if strings.HasPrefix(trimmed, "##") || strings.HasPrefix(trimmed, "# ") {
 			continue
 		}
+
+		// 跳过纯 Markdown 标记行
 		if trimmed == "-" || trimmed == "*" || trimmed == "---" {
 			continue
 		}
 
-		// 如果这行只是注释，跳过
-		if strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-
-		// 检查是否包含非ASCII字符（非英文）
+		// 检查是否包含非ASCII字符
 		hasNonASCII := false
 		for _, r := range trimmed {
 			if r > 127 {
@@ -188,9 +192,9 @@ func stripCodeFence(s string) string {
 			}
 		}
 
-		// 如果包含非ASCII字符，跳过这行（而不是跳过之后的所有行）
+		// 如果包含非ASCII，跳过这行
 		if hasNonASCII {
-			fmt.Printf("[stripCodeFence] 跳过第%d行（包含非ASCII字符）: %s\n", i+1, trimmed[:min(len(trimmed), 30)])
+			fmt.Printf("[stripCodeFence] 跳过第%d行（非ASCII）: %.30s...\n", i+1, trimmed)
 			continue
 		}
 
@@ -199,7 +203,19 @@ func stripCodeFence(s string) string {
 
 	if len(resultLines) > 0 {
 		s = strings.TrimSpace(strings.Join(resultLines, "\n"))
-		debugLog("去除非ASCII后")
+		fmt.Printf("[stripCodeFence] 最终长度: %d\n", len(s))
+	}
+
+	// 最终安全检查：如果结果看起来不像Python代码（第一行不是import或def），尝试找第一个import
+	if len(resultLines) > 0 && !strings.HasPrefix(strings.TrimSpace(resultLines[0]), "import") && !strings.HasPrefix(strings.TrimSpace(resultLines[0]), "def") {
+		for i, line := range resultLines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "import ") || strings.HasPrefix(trimmed, "from ") {
+				fmt.Printf("[stripCodeFence] 找到第一个import在第%d行\n", i+1)
+				s = strings.TrimSpace(strings.Join(resultLines[i:], "\n"))
+				break
+			}
+		}
 	}
 
 	return s
