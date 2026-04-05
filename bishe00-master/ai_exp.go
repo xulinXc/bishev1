@@ -112,6 +112,8 @@ func newAIProvider(providerName, apiKey, baseURL, model string, timeoutSec ...in
 
 func stripCodeFence(s string) string {
 	s = strings.TrimSpace(s)
+
+	// 去除 markdown 代码围栏
 	if strings.HasPrefix(s, "```") {
 		lines := strings.Split(s, "\n")
 		if len(lines) >= 3 {
@@ -119,9 +121,51 @@ func stripCodeFence(s string) string {
 			if strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
 				lines = lines[:len(lines)-1]
 			}
-			return strings.TrimSpace(strings.Join(lines, "\n"))
+			s = strings.TrimSpace(strings.Join(lines, "\n"))
 		}
 	}
+
+	// 替换中文引号为英文引号
+	s = strings.NewReplacer(
+		"", "\"",
+		"", "\"",
+		"'", "'",
+		"'", "'",
+	).Replace(s)
+
+	// 去除任何残留的 markdown 或解释性文本
+	// 如果第一行看起来不像 Python 代码（包含中文或特殊字符），尝试找到第一个看起来像代码的行
+	lines := strings.Split(s, "\n")
+	resultLines := make([]string, 0)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// 如果这行是空的，跳过
+		if trimmed == "" {
+			continue
+		}
+		// 如果这行只是注释，跳过
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		// 检查是否包含非ASCII字符（非英文）
+		hasNonASCII := false
+		for _, r := range trimmed {
+			if r > 127 {
+				hasNonASCII = true
+				break
+			}
+		}
+		// 如果包含非ASCII字符，不使用这行及之前的所有行
+		if hasNonASCII {
+			continue
+		}
+		resultLines = append(resultLines, line)
+	}
+
+	if len(resultLines) > 0 {
+		s = strings.TrimSpace(strings.Join(resultLines, "\n"))
+	}
+
 	return s
 }
 
@@ -175,24 +219,25 @@ func buildUserPromptForCategory(category VulnCategory, targetBaseURL string, exp
 	}
 
 	// 基础要求
-	baseRequirements := fmt.Sprintf(`请基于以下信息生成一个单文件 Python3 利用脚本，要求：
-1) 只输出 Python 代码，不要输出解释/Markdown/代码块围栏。
-2) 使用 requests.Session()；默认 verify=False，并禁用 urllib3 警告。
-3) 命令行参数必须同时支持：%s、--timeout(可选)。
-4) 严格按 EXP steps 顺序发包，支持 {{var}} 占位符替换与变量提取（bodyRegex/headerRegex）。
-5) 生成的脚本不得直接 print(response.text) 或输出整页 HTML。必须对回显做"去噪"处理。
-6) 实现 validate(status/bodyContains/headerContains)，并在命中时输出 "VULNERABLE" 与关键证据。
-7) 不依赖第三方库（除了 requests）。特别注意：禁止导入 readline 模块，以确保 Windows 兼容性。
-8) %s
-9) 【关键执行日志】在脚本中增加详细的执行日志，打印关键步骤：
-   [INFO] Target: ...
-   [INFO] Payload: ...
-   [INFO] Sending request...
-   [INFO] Response status: ...
-   [INFO] Response length: ...
-   [INFO] Extracting output...
-   [RESULT] ...
-`, targetArgDesc, targetUrlHint)
+	baseRequirements := fmt.Sprintf("请基于以下信息生成一个单文件 Python3 利用脚本，要求：\n"+
+		"1) 【最重要】只输出 Python 代码，不要输出任何解释、Markdown、代码块围栏(```)或注释。\n"+
+		"2) 【最重要】代码中所有字符串必须使用英文双引号 \",绝对不要使用中文引号 或单引号。\n"+
+		"3) 【最重要】代码必须是纯英文，所有注释和输出都必须是英文。\n"+
+		"4) 使用 requests.Session()；默认 verify=False，并禁用 urllib3 警告。\n"+
+		"5) 命令行参数必须同时支持：%s、--timeout(可选)。\n"+
+		"6) 严格按 EXP steps 顺序发包，支持 {{var}} 占位符替换与变量提取（bodyRegex/headerRegex）。\n"+
+		"7) 生成的脚本不得直接 print(response.text) 或输出整页 HTML。必须对回显做去噪处理。\n"+
+		"8) 实现 validate(status/bodyContains/headerContains)，并在命中时输出 VULNERABLE 与关键证据。\n"+
+		"9) 不依赖第三方库（除了 requests）。特别注意：禁止导入 readline 模块，以确保 Windows 兼容性。\n"+
+		"10) %s\n"+
+		"11) 【关键执行日志】在脚本中增加详细的执行日志，打印关键步骤：\n"+
+		"   [INFO] Target: ...\n"+
+		"   [INFO] Payload: ...\n"+
+		"   [INFO] Sending request...\n"+
+		"   [INFO] Response status: ...\n"+
+		"   [INFO] Extracting output...\n"+
+		"   [RESULT] ...\n",
+		targetArgDesc, targetUrlHint)
 
 	// 根据漏洞类型添加特定要求
 	var specificRequirements string
