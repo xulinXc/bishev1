@@ -1,0 +1,20 @@
+# 编译产物
+bishe
+neonscan.exe
+*.exe
+
+# 上传目录
+uploads/
+
+# 优化备份
+../bishe00-optimization/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

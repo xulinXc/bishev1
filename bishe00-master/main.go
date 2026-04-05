@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"bishe/internal/mcp"           // MCP（Model Context Protocol）相关功能，用于与IDA Pro和JADX集成，以及AI分析
+	"bishe/internal/pkg/utils"     // 公共工具函数
 	shouji "bishe/internal/shouji" // 解包与JS信息收集功能
 
 	yaml "gopkg.in/yaml.v3"
@@ -4741,13 +4742,6 @@ func generatePythonScriptsForVulnerabilities(allResults map[string]interface{}) 
 		return nil
 	}
 
-	baseFromResultURL := func(u string) string {
-		pu, err := url.Parse(strings.TrimSpace(u))
-		if err != nil || pu == nil || pu.Scheme == "" || pu.Host == "" {
-			return ""
-		}
-		return pu.Scheme + "://" + pu.Host
-	}
 	targetBaseURL := ""
 	if s, ok := pocScan["target"].(string); ok {
 		targetBaseURL = strings.TrimSpace(s)
@@ -4761,41 +4755,6 @@ func generatePythonScriptsForVulnerabilities(allResults map[string]interface{}) 
 		targetBaseURL = "http://" + targetBaseURL
 	}
 
-	toStr := func(v interface{}) string {
-		switch x := v.(type) {
-		case string:
-			return x
-		case []byte:
-			return string(x)
-		default:
-			if v == nil {
-				return ""
-			}
-			return fmt.Sprint(v)
-		}
-	}
-	toHeaderMap := func(v interface{}) map[string]string {
-		out := map[string]string{}
-		if v == nil {
-			return out
-		}
-		switch m := v.(type) {
-		case map[string]string:
-			for k, vv := range m {
-				out[k] = vv
-			}
-		case map[string]interface{}:
-			for k, vv := range m {
-				out[k] = toStr(vv)
-			}
-		case map[interface{}]interface{}:
-			for kk, vv := range m {
-				out[toStr(kk)] = toStr(vv)
-			}
-		}
-		return out
-	}
-
 	cmdRe := regexp.MustCompile(`server\[REQUEST_METHOD\]=[^&]*`)
 	scripts := make([]map[string]interface{}, 0, len(results))
 	for _, r := range results {
@@ -4803,18 +4762,18 @@ func generatePythonScriptsForVulnerabilities(allResults map[string]interface{}) 
 		if !ok || reqMap == nil {
 			continue
 		}
-		method := strings.ToUpper(strings.TrimSpace(toStr(reqMap["method"])))
+		method := strings.ToUpper(strings.TrimSpace(utils.ToStr(reqMap["method"])))
 		if method == "" {
 			method = "GET"
 		}
-		path := strings.TrimSpace(toStr(reqMap["path"]))
-		body := toStr(reqMap["body"])
-		headers := toHeaderMap(reqMap["headers"])
+		path := strings.TrimSpace(utils.ToStr(reqMap["path"]))
+		body := utils.ToStr(reqMap["body"])
+		headers := utils.ToHeaderMap(reqMap["headers"])
 
-		u := toStr(r["url"])
+		u := utils.ToStr(r["url"])
 		specBase := strings.TrimRight(targetBaseURL, "/")
 		if specBase == "" {
-			specBase = baseFromResultURL(u)
+			specBase = utils.BaseFromResultURL(u)
 		}
 		if specBase == "" {
 			continue
@@ -4831,7 +4790,7 @@ func generatePythonScriptsForVulnerabilities(allResults map[string]interface{}) 
 			}
 		}
 
-		name := strings.TrimSpace(toStr(r["poc"]))
+		name := strings.TrimSpace(utils.ToStr(r["poc"]))
 		if name == "" {
 			name = "Generated EXP"
 		}
