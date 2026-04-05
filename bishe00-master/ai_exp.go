@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"bishe/internal/mcp"
 )
@@ -247,19 +246,19 @@ func aiGenPythonFromExpHandler(w http.ResponseWriter, r *http.Request) {
 
 	req.TargetBaseURL = strings.TrimSpace(req.TargetBaseURL)
 	keyInfo := buildExpKeyInfo(req.TargetBaseURL, req.Exp)
-	fallback := generatePythonFromExpSpec(req.TargetBaseURL, req.Exp)
 
 	// 检测漏洞类型
 	category := DetectVulnCategory(req.Exp)
 	fmt.Printf("[分类] 漏洞类型: %s\n", category)
 
+	// 没有 provider 时，只生成模板代码
 	providerName := strings.TrimSpace(req.Provider)
-	if providerName == "" {
+	if providerName == "" || req.APIKey == "" {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(AIGenPythonFromExpResp{
 			Name:     req.Exp.Name,
 			KeyInfo:  keyInfo,
-			Python:   fallback,
+			Python:   generatePythonFromExpSpec(req.TargetBaseURL, req.Exp),
 			Category: category.String(),
 		})
 		return
@@ -271,90 +270,64 @@ func aiGenPythonFromExpHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(AIGenPythonFromExpResp{
 			Name:     req.Exp.Name,
 			KeyInfo:  keyInfo,
-			Python:   fallback,
+			Python:   generatePythonFromExpSpec(req.TargetBaseURL, req.Exp),
 			Category: category.String(),
 		})
 		return
 	}
 
-	// 根据漏洞类型选择模板提示词
-	systemPrompt := getSystemPromptForCategory(category)
-	userPrompt := buildUserPromptForCategory(category, req.TargetBaseURL, req.Exp, keyInfo, req.Verify)
+	// 设置日志通道
+	logChan := make(chan string, 100)
+	var logs []string
+	go func() {
+		for log := range logChan {
+			logs = append(logs, log)
+		}
+	}()
 
-	messages := []mcp.ChatMessage{
-		{Role: "system", Content: systemPrompt, Time: time.Now().Format(time.RFC3339)},
-		{Role: "user", Content: userPrompt, Time: time.Now().Format(time.RFC3339)},
+	// 使用统一生成验证函数
+	fmt.Println("\n========== 启动 EXP 生成和验证流程 ==========")
+	maxRetries := req.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
 	}
-	content, _, err := provider.Chat(messages, nil)
-	python := fallback
-	if err == nil {
-		clean := stripCodeFence(content)
-		if strings.TrimSpace(clean) != "" {
-			python = clean
-		}
+
+	targetURL := req.TargetURL
+	if targetURL == "" {
+		targetURL = req.TargetBaseURL
 	}
 
-	// 如果启用自动验证
-	if req.AutoVerify && req.TargetURL != "" {
-		fmt.Println("\n========== 启动自动验证流程 ==========")
-		logChan := make(chan string, 100)
-		var logs []string
+	finalCode, verified, _ := GenerateExpWithVerification(
+		targetURL,
+		req.Exp,
+		provider,
+		maxRetries,
+		logChan,
+	)
+	close(logChan)
 
-		// 启动日志收集协程
-		go func() {
-			for log := range logChan {
-				logs = append(logs, log)
-			}
-		}()
-
-		config := ExpVerifyConfig{
-			TargetURL:  req.TargetURL,
-			ExpSpec:    req.Exp,
-			PythonCode: python,
-			Category:   category,
-			MaxRetries: req.MaxRetries,
-			TimeoutSec: 10,
-		}
-
-		if config.MaxRetries <= 0 {
-			config.MaxRetries = 5
-		}
-
-		finalCode, verifyErr := GenerateAndVerifyExp(config, provider, logChan)
-		close(logChan)
-
-		verified := verifyErr == nil
-		attempts := config.MaxRetries
-		if verified {
-			python = finalCode
-			// 计算实际尝试次数
-			for i, log := range logs {
-				if strings.Contains(log, "验证成功") {
-					attempts = i / 5 // 粗略估计
-					break
-				}
+	attempts := maxRetries
+	if verified {
+		for i, log := range logs {
+			if strings.Contains(log, "验证成功") {
+				attempts = i/5 + 1
+				break
 			}
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(AIGenPythonFromExpResp{
-			Name:           req.Exp.Name,
-			KeyInfo:        keyInfo,
-			Python:         python,
-			Verified:       verified,
-			VerifyAttempts: attempts,
-			VerifyLogs:     logs,
-			Category:       category.String(),
-		})
-		return
 	}
+
+	// 重新构建 keyInfo（因为 GenerateExpWithVerification 内部没有返回它）
+	keyInfo = buildExpKeyInfo(targetURL, req.Exp)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(AIGenPythonFromExpResp{
-		Name:     req.Exp.Name,
-		KeyInfo:  keyInfo,
-		Python:   python,
-		Category: category.String(),
+		Name:           req.Exp.Name,
+		KeyInfo:        keyInfo,
+		Python:         finalCode,
+		Verified:       verified,
+		VerifyAttempts: attempts,
+		VerifyLogs:     logs,
+		Category:       category.String(),
 	})
 }
 

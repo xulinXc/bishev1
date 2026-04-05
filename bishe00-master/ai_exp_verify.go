@@ -95,6 +95,97 @@ type ExpVerifyConfig struct {
 	TimeoutSec int
 }
 
+// GenerateExpWithVerification 统一生成并验证 EXP
+// 自动处理：无 provider 时使用模板生成，有 provider 时先用 AI 生成再用 Verify 验证
+func GenerateExpWithVerification(
+	targetURL string,
+	spec ExpSpec,
+	provider mcp.AIProvider,
+	maxRetries int,
+	logChan chan string,
+) (python string, verified bool, err error) {
+	log := func(format string, args ...interface{}) {
+		msg := fmt.Sprintf(format, args...)
+		if logChan != nil {
+			logChan <- msg
+		}
+		fmt.Println(msg)
+	}
+
+	// 1. 使用模板生成基础代码
+	baseCode := generatePythonFromExpSpec(targetURL, spec)
+	log("[生成] 模板代码生成完成，长度: %d", len(baseCode))
+
+	// 2. 如果有 provider，使用 AI 生成更好的代码
+	if provider != nil {
+		log("[AI] 正在请求 AI 生成改进代码...")
+		aiCode := requestExpFromAI(provider, spec, log)
+		if aiCode != "" {
+			baseCode = aiCode
+			log("[AI] AI 代码生成成功，长度: %d", len(aiCode))
+		} else {
+			log("[AI] AI 代码生成失败，使用模板代码")
+		}
+	}
+
+	// 3. 进行验证
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+	config := ExpVerifyConfig{
+		TargetURL:  targetURL,
+		ExpSpec:    spec,
+		PythonCode: baseCode,
+		Category:   DetectVulnCategory(spec),
+		MaxRetries: maxRetries,
+		TimeoutSec: 30,
+	}
+
+	log("[验证] 开始验证流程...")
+	finalCode, verifyErr := GenerateAndVerifyExp(config, provider, logChan)
+	if verifyErr != nil {
+		log("[验证] 验证失败: %v", verifyErr)
+		return baseCode, false, verifyErr
+	}
+
+	return finalCode, true, nil
+}
+
+// requestExpFromAI 请求 AI 生成 EXP 代码
+func requestExpFromAI(provider mcp.AIProvider, spec ExpSpec, log func(string, ...interface{})) string {
+	category := DetectVulnCategory(spec)
+	keyInfo := buildExpKeyInfo("", spec)
+
+	systemPrompt := getSystemPromptForCategory(category)
+	userPrompt := buildUserPromptForCategory(category, "", spec, keyInfo, nil)
+
+	messages := []mcp.ChatMessage{
+		{Role: "system", Content: systemPrompt, Time: time.Now().Format(time.RFC3339)},
+		{Role: "user", Content: userPrompt, Time: time.Now().Format(time.RFC3339)},
+	}
+
+	if log != nil {
+		log("[AI] 发送请求到 AI...")
+	}
+	content, _, err := provider.Chat(messages, nil)
+	if err != nil {
+		if log != nil {
+			log("[AI] AI 请求失败: %v", err)
+		}
+		return ""
+	}
+
+	clean := stripCodeFence(content)
+	if clean == "" {
+		if log != nil {
+			log("[AI] AI 返回为空")
+		}
+		return ""
+	}
+
+	return clean
+}
+
 func GenerateAndVerifyExp(config ExpVerifyConfig, provider mcp.AIProvider, logChan chan<- string) (string, error) {
 	log := func(format string, args ...interface{}) {
 		msg := fmt.Sprintf(format, args...)
@@ -168,7 +259,7 @@ func GenerateAndVerifyExp(config ExpVerifyConfig, provider mcp.AIProvider, logCh
 
 		log("[分析] 开始构建修正提示词...")
 		correctionPrompt := buildCorrectionPrompt(config.ExpSpec, currentCode, failureReason, category, testCmd, result, log)
-		
+
 		log("[AI] 请求AI生成修正版本...")
 		correctedCode := requestExpCorrection(provider, correctionPrompt, log)
 
@@ -217,7 +308,7 @@ func verifyExp(expFile, targetURL, testCmd string, timeoutSec int, category Vuln
 	// Linux/Mac系统会尝试python3
 	pythonCmd := "python"
 	pythonPath := "python"
-	
+
 	// 测试python命令是否可用
 	testPythonCmd := exec.Command("python", "--version")
 	if err := testPythonCmd.Run(); err != nil {
@@ -266,7 +357,7 @@ func verifyExp(expFile, targetURL, testCmd string, timeoutSec int, category Vuln
 	startTime := time.Now()
 	err := cmd.Run()
 	duration := time.Since(startTime)
-	
+
 	result.Output = stdout.String()
 	result.Error = stderr.String()
 
@@ -284,7 +375,7 @@ func verifyExp(expFile, targetURL, testCmd string, timeoutSec int, category Vuln
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		}
-		
+
 		// exit status 9009 在Windows上表示找不到命令
 		// 但我们已经测试过Python可用，所以这可能是PATH问题
 		if exitCode == 9009 || strings.Contains(err.Error(), "executable file not found") {
@@ -293,21 +384,21 @@ func verifyExp(expFile, targetURL, testCmd string, timeoutSec int, category Vuln
 			log("[运行] 这通常是PATH环境变量问题")
 			return result
 		}
-		
+
 		// 其他错误（如参数错误、连接错误、脚本逻辑错误等）
 		// 这些错误说明Python可以运行，只是脚本有问题，可以通过AI修复
 		result.Success = true // 标记为"可以运行"，虽然有错误
-		
+
 		// 合并stdout和stderr作为完整的错误信息
 		fullError := stderr.String()
 		if stdout.String() != "" {
 			fullError = stdout.String() + "\n" + fullError
 		}
 		result.Error = fullError
-		
+
 		log("[运行] ⚠ 脚本执行返回错误码 %d，但Python可以运行", exitCode)
 		log("[运行] 这可能是参数错误、连接错误或脚本逻辑问题")
-		
+
 		// 打印错误信息供AI分析
 		if fullError != "" {
 			errorLines := strings.Split(fullError, "\n")
@@ -322,7 +413,7 @@ func verifyExp(expFile, targetURL, testCmd string, timeoutSec int, category Vuln
 		result.Success = true
 		log("[运行] ✓ EXP执行成功（返回码 0）")
 	}
-	
+
 	// 打印输出的前几行
 	if result.Output != "" {
 		outputLines := strings.Split(result.Output, "\n")
@@ -361,7 +452,7 @@ func verifyExp(expFile, targetURL, testCmd string, timeoutSec int, category Vuln
 		result.CanExtract = true
 		result.ExtractDemo = extractDemo
 		log("[提取] ✓ 成功提取命令输出")
-		
+
 		// 显示提取的内容
 		extractLines := strings.Split(extractDemo, "\n")
 		for i, line := range extractLines {
@@ -369,29 +460,29 @@ func verifyExp(expFile, targetURL, testCmd string, timeoutSec int, category Vuln
 				log("[提取] 输出内容: %s", strings.TrimSpace(line))
 			}
 		}
-		
+
 		// 验证提取的内容是否是有效的命令输出
 		// 对于RCE类型，应该包含类似用户名、路径等信息
 		if category == CatCommandInjection || category == CatCodeExecution {
 			// 检查是否包含典型的命令输出特征
 			hasValidOutput := false
-			
+
 			// 检查是否包含NEONSCAN_TEST标记（说明命令执行成功）
 			if strings.Contains(extractDemo, "NEONSCAN_TEST") {
 				hasValidOutput = true
 				log("[验证] ✓ 检测到NEONSCAN_TEST标记，命令执行成功")
 			}
-			
+
 			// 检查是否包含典型的Linux/Unix输出（用户名、路径等）
-			if strings.Contains(extractDemo, "root") || 
-			   strings.Contains(extractDemo, "www-data") ||
-			   strings.Contains(extractDemo, "/") ||
-			   strings.Contains(extractDemo, "uid=") ||
-			   strings.Contains(extractDemo, "gid=") {
+			if strings.Contains(extractDemo, "root") ||
+				strings.Contains(extractDemo, "www-data") ||
+				strings.Contains(extractDemo, "/") ||
+				strings.Contains(extractDemo, "uid=") ||
+				strings.Contains(extractDemo, "gid=") {
 				hasValidOutput = true
 				log("[验证] ✓ 检测到典型的命令输出特征")
 			}
-			
+
 			// 如果没有有效输出，标记为无法提取
 			if !hasValidOutput {
 				result.CanExtract = false
@@ -433,11 +524,11 @@ func extractOutput(output string, log func(string, ...interface{})) string {
 		// 跳过日志行、状态行和无用的行
 		if strings.Contains(strings.ToLower(line), "vulnerable") ||
 			strings.Contains(strings.ToLower(line), "not vulnerable") ||
-			strings.HasPrefix(line, "[") ||  // 跳过日志行 [INFO], [ERROR]等
+			strings.HasPrefix(line, "[") || // 跳过日志行 [INFO], [ERROR]等
 			strings.HasPrefix(line, "-") ||
 			strings.HasPrefix(line, "+") ||
 			strings.HasPrefix(line, "*") ||
-			strings.Contains(line, "request failed") ||  // 跳过错误信息
+			strings.Contains(line, "request failed") || // 跳过错误信息
 			strings.Contains(line, "No connection") {
 			continue
 		}
@@ -461,14 +552,14 @@ func analyzeFailure(result ExpVerifyResult, category VulnCategory, log func(stri
 	var reasons []string
 
 	// 如果Python本身无法运行，这是致命错误
-	if !result.Success && (strings.Contains(result.Error, "Python命令执行失败") || 
-	                       strings.Contains(result.Error, "executable file not found")) {
+	if !result.Success && (strings.Contains(result.Error, "Python命令执行失败") ||
+		strings.Contains(result.Error, "executable file not found")) {
 		reasons = append(reasons, "Python命令执行失败，这是环境问题，不是代码问题")
 		return strings.Join(reasons, "; ")
 	}
 
 	// Python可以运行，但脚本有错误 - 这些都可以通过AI修复
-	
+
 	// 1. 检查参数相关错误
 	if strings.Contains(result.Error, "the following arguments are required") {
 		// 提取缺少的参数
@@ -479,7 +570,7 @@ func analyzeFailure(result ExpVerifyResult, category VulnCategory, log func(stri
 			reasons = append(reasons, "缺少必需的命令行参数")
 		}
 	}
-	
+
 	if strings.Contains(result.Error, "unrecognized arguments") {
 		reasons = append(reasons, "命令行参数解析错误，可能参数名称不正确")
 	}
@@ -488,7 +579,7 @@ func analyzeFailure(result ExpVerifyResult, category VulnCategory, log func(stri
 	if strings.Contains(result.Error, "No connection adapters were found") {
 		reasons = append(reasons, "URL格式错误：目标URL缺少http://或https://前缀，需要在代码中自动添加")
 	}
-	
+
 	if strings.Contains(result.Error, "Invalid URL") || strings.Contains(result.Error, "No scheme supplied") {
 		reasons = append(reasons, "URL格式无效，需要确保URL包含完整的scheme（http://或https://）")
 	}
@@ -497,11 +588,11 @@ func analyzeFailure(result ExpVerifyResult, category VulnCategory, log func(stri
 	if strings.Contains(result.Error, "Connection refused") || strings.Contains(result.Error, "connection refused") {
 		reasons = append(reasons, "目标服务器拒绝连接，可能端口不正确或服务未运行")
 	}
-	
+
 	if strings.Contains(result.Error, "timeout") || strings.Contains(result.Error, "timed out") {
 		reasons = append(reasons, "连接超时，目标服务器可能无响应或网络不通")
 	}
-	
+
 	if strings.Contains(result.Error, "Name or service not known") || strings.Contains(result.Error, "nodename nor servname provided") {
 		reasons = append(reasons, "无法解析目标主机名，请检查URL是否正确")
 	}
@@ -510,11 +601,11 @@ func analyzeFailure(result ExpVerifyResult, category VulnCategory, log func(stri
 	if strings.Contains(result.Error, "SyntaxError") {
 		reasons = append(reasons, "Python语法错误，需要修复代码语法")
 	}
-	
+
 	if strings.Contains(result.Error, "IndentationError") {
 		reasons = append(reasons, "Python缩进错误，需要修复代码缩进")
 	}
-	
+
 	if strings.Contains(result.Error, "NameError") {
 		re := regexp.MustCompile(`name '(.+?)' is not defined`)
 		if matches := re.FindStringSubmatch(result.Error); len(matches) > 1 {
@@ -538,7 +629,7 @@ func analyzeFailure(result ExpVerifyResult, category VulnCategory, log func(stri
 	if strings.Contains(result.Error, "404") || strings.Contains(result.Error, "Not Found") {
 		reasons = append(reasons, "HTTP 404错误，请求的路径不存在，需要检查URL路径")
 	}
-	
+
 	if strings.Contains(result.Error, "500") || strings.Contains(result.Error, "Internal Server Error") {
 		reasons = append(reasons, "HTTP 500错误，服务器内部错误，可能payload格式不正确")
 	}
@@ -547,7 +638,7 @@ func analyzeFailure(result ExpVerifyResult, category VulnCategory, log func(stri
 	if result.Success && strings.Contains(strings.ToLower(result.Output), "not vulnerable") {
 		reasons = append(reasons, "目标不存在该漏洞，或payload不正确")
 	}
-	
+
 	if result.Success && !result.Matched && !strings.Contains(result.Output, "vulnerable") {
 		reasons = append(reasons, "脚本执行成功但未输出VULNERABLE标记，需要添加漏洞检测逻辑和输出")
 	}
@@ -643,8 +734,8 @@ func buildCorrectionPrompt(expSpec ExpSpec, currentCode, failureReason string, c
 	prompt.WriteString("2. 代码必须是可以直接运行的完整脚本\n\n")
 
 	// 根据具体错误类型给出针对性的修正建议
-	if strings.Contains(failureReason, "缺少必需的命令行参数") || 
-	   strings.Contains(result.Error, "the following arguments are required") {
+	if strings.Contains(failureReason, "缺少必需的命令行参数") ||
+		strings.Contains(result.Error, "the following arguments are required") {
 		prompt.WriteString("【关键修复】命令行参数问题：\n")
 		prompt.WriteString("- 确保使用argparse正确定义所有参数\n")
 		prompt.WriteString("- --target 参数必须是required=True\n")
@@ -654,9 +745,9 @@ func buildCorrectionPrompt(expSpec ExpSpec, currentCode, failureReason string, c
 		prompt.WriteString("  parser.add_argument('--cmd', default='whoami', help='Command to execute')\n\n")
 	}
 
-	if strings.Contains(failureReason, "URL格式错误") || 
-	   strings.Contains(result.Error, "No connection adapters") ||
-	   strings.Contains(result.Error, "Invalid URL") {
+	if strings.Contains(failureReason, "URL格式错误") ||
+		strings.Contains(result.Error, "No connection adapters") ||
+		strings.Contains(result.Error, "Invalid URL") {
 		prompt.WriteString("【关键修复】URL格式问题：\n")
 		prompt.WriteString("- 在使用target之前，检查并添加http://前缀\n")
 		prompt.WriteString("- 使用urllib.parse.urljoin正确拼接URL路径\n")
@@ -680,7 +771,7 @@ func buildCorrectionPrompt(expSpec ExpSpec, currentCode, failureReason string, c
 
 	if strings.Contains(failureReason, "无法提取命令输出") || (result.Matched && !result.CanExtract) {
 		prompt.WriteString("【关键修复】命令输出提取：\n")
-		
+
 		// 检查是否是URL格式导致命令未执行
 		if strings.Contains(result.Output, "VULNERABLE") && !strings.Contains(result.Output, "NEONSCAN_TEST") {
 			prompt.WriteString("- **重要**：虽然输出了VULNERABLE，但命令并未实际执行\n")
@@ -751,9 +842,9 @@ func tryAlternativeFix(currentCode string, result ExpVerifyResult, category Vuln
 	log("[备用修复] 尝试自动修复...")
 
 	// 修复URL格式问题
-	if strings.Contains(result.Error, "No connection adapters") || 
-	   strings.Contains(result.Error, "Invalid URL") ||
-	   strings.Contains(result.Error, "No scheme supplied") {
+	if strings.Contains(result.Error, "No connection adapters") ||
+		strings.Contains(result.Error, "Invalid URL") ||
+		strings.Contains(result.Error, "No scheme supplied") {
 		log("[备用修复] 检测到URL格式错误，添加URL前缀检查...")
 		return fixURLScheme(currentCode, log)
 	}
@@ -788,10 +879,10 @@ func fixURLScheme(code string, log func(string, ...interface{})) string {
 
 		// 在main函数中，找到target赋值后添加URL前缀检查
 		if inMainFunction && !targetAssigned {
-			if strings.Contains(trimmed, "target = args.target") || 
-			   strings.Contains(trimmed, "base = args.target") {
+			if strings.Contains(trimmed, "target = args.target") ||
+				strings.Contains(trimmed, "base = args.target") {
 				fixedLines = append(fixedLines, line)
-				
+
 				// 添加URL前缀检查
 				indent := ""
 				for j := 0; j < len(line); j++ {
@@ -801,11 +892,11 @@ func fixURLScheme(code string, log func(string, ...interface{})) string {
 						break
 					}
 				}
-				
+
 				fixedLines = append(fixedLines, indent+"# 确保URL包含scheme")
 				fixedLines = append(fixedLines, indent+"if not target.startswith('http://') and not target.startswith('https://'):")
 				fixedLines = append(fixedLines, indent+"    target = 'http://' + target")
-				
+
 				targetAssigned = true
 				log("[备用修复] 已添加URL前缀检查")
 				continue
@@ -821,7 +912,7 @@ func fixURLScheme(code string, log func(string, ...interface{})) string {
 		fixedLines = []string{}
 		for _, line := range lines {
 			fixedLines = append(fixedLines, line)
-			
+
 			trimmed := strings.TrimSpace(line)
 			if strings.Contains(trimmed, "args = parser.parse_args()") {
 				// 获取缩进
@@ -833,14 +924,14 @@ func fixURLScheme(code string, log func(string, ...interface{})) string {
 						break
 					}
 				}
-				
+
 				fixedLines = append(fixedLines, "")
 				fixedLines = append(fixedLines, indent+"# 确保URL包含scheme")
 				fixedLines = append(fixedLines, indent+"target = args.target")
 				fixedLines = append(fixedLines, indent+"if not target.startswith('http://') and not target.startswith('https://'):")
 				fixedLines = append(fixedLines, indent+"    target = 'http://' + target")
 				fixedLines = append(fixedLines, indent+"args.target = target")
-				
+
 				log("[备用修复] 已在args解析后添加URL前缀检查")
 			}
 		}
