@@ -32,6 +32,45 @@ type Validation struct {
 // StatusList 支持字符串和整数两种格式的状态码列表
 type StatusList []int
 
+// parseStatusList 解析状态列表，支持多种输入格式
+func parseStatusList(data interface{}) []int {
+	var result []int
+
+	switch v := data.(type) {
+	case []int:
+		return v
+	case []interface{}:
+		result = make([]int, 0, len(v))
+		for _, item := range v {
+			switch val := item.(type) {
+			case int:
+				result = append(result, val)
+			case float64:
+				result = append(result, int(val))
+			case string:
+				if val != "" && val != "suspect" {
+					if i, err := strconv.Atoi(val); err == nil {
+						result = append(result, i)
+					}
+				}
+			}
+		}
+		return result
+	case string:
+		if v == "" || v == "suspect" {
+			return []int{}
+		}
+		if i, err := strconv.Atoi(v); err == nil {
+			return []int{i}
+		}
+	case int:
+		return []int{v}
+	case float64:
+		return []int{int(v)}
+	}
+	return []int{}
+}
+
 // UnmarshalJSON 自定义JSON解析，支持字符串和整数两种格式
 func (s *StatusList) UnmarshalJSON(data []byte) error {
 	// 尝试作为整数数组解析
@@ -43,30 +82,14 @@ func (s *StatusList) UnmarshalJSON(data []byte) error {
 	// 尝试作为字符串数组解析
 	var strList []string
 	if err := json.Unmarshal(data, &strList); err == nil {
-		result := make([]int, 0, len(strList))
-		for _, str := range strList {
-			// 跳过非数字字符串（如"suspect"）
-			if str == "suspect" || str == "" {
-				continue
-			}
-			if val, err := strconv.Atoi(str); err == nil {
-				result = append(result, val)
-			}
-		}
-		*s = result
+		*s = parseStatusList(strList)
 		return nil
 	}
 	// 尝试作为单个字符串解析
 	var str string
 	if err := json.Unmarshal(data, &str); err == nil {
-		if str == "suspect" || str == "" {
-			*s = []int{}
-			return nil
-		}
-		if val, err := strconv.Atoi(str); err == nil {
-			*s = []int{val}
-			return nil
-		}
+		*s = parseStatusList(str)
+		return nil
 	}
 	// 尝试作为单个整数解析
 	var i int
@@ -90,30 +113,14 @@ func (s *StatusList) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	// 尝试作为字符串数组解析
 	var strList []string
 	if err := unmarshal(&strList); err == nil {
-		result := make([]int, 0, len(strList))
-		for _, str := range strList {
-			// 跳过非数字字符串（如"suspect"）
-			if str == "suspect" || str == "" {
-				continue
-			}
-			if val, err := strconv.Atoi(str); err == nil {
-				result = append(result, val)
-			}
-		}
-		*s = result
+		*s = parseStatusList(strList)
 		return nil
 	}
 	// 尝试作为单个字符串解析
 	var str string
 	if err := unmarshal(&str); err == nil {
-		if str == "suspect" || str == "" {
-			*s = []int{}
-			return nil
-		}
-		if val, err := strconv.Atoi(str); err == nil {
-			*s = []int{val}
-			return nil
-		}
+		*s = parseStatusList(str)
+		return nil
 	}
 	// 尝试作为单个整数解析
 	var i int
@@ -121,7 +128,6 @@ func (s *StatusList) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		*s = []int{i}
 		return nil
 	}
-	// 如果都失败，返回空列表
 	*s = []int{}
 	return nil
 }
@@ -496,7 +502,7 @@ func execExp(base string, spec ExpSpec, client *http.Client) (bool, int, int, st
 	lastStatus := 0                      // 最后一步的HTTP状态码
 	vars := make(map[string]string)      // 变量存储（用于步骤间传递数据）
 	cookieJar := make(map[string]string) // Cookie存储（自动管理Cookie）
-	
+
 	// 从vars中生成使用说明
 	usage := ""
 
@@ -581,7 +587,7 @@ func execExp(base string, spec ExpSpec, client *http.Client) (bool, int, int, st
 			matchedSteps++
 		}
 	}
-	
+
 	// 如果有提取的变量，生成利用说明
 	if len(vars) > 0 {
 		var parts []string
@@ -595,10 +601,10 @@ func execExp(base string, spec ExpSpec, client *http.Client) (bool, int, int, st
 			usage = "提取到的信息:\n" + strings.Join(parts, "\n")
 		}
 	}
-	
+
 	// 生成利用建议，替换其中的变量
 	suggestion := substVars(spec.ExploitSuggestion, vars)
-	
+
 	// success when all steps matched
 	return matchedSteps == len(spec.Steps) && len(spec.Steps) > 0, matchedSteps, lastStatus, usage, suggestion
 }

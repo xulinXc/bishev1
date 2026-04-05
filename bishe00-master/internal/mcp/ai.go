@@ -14,22 +14,58 @@ import (
 )
 
 // LogAIInteraction 记录 AI 交互日志
-func LogAIInteraction(provider, model string, messages []ChatMessage, response string, toolCalls []AIToolCall, err error) {
+// previousMsgCount 参数用于标识之前已打印的消息数量，避免重复打印
+func LogAIInteraction(provider, model string, messages []ChatMessage, response string, toolCalls []AIToolCall, err error, previousMsgCount ...int) {
 	log.Println("========== AI Interaction Log ==========")
 	log.Printf("Time: %s\n", time.Now().Format(time.RFC3339))
 	log.Printf("Provider: %s\n", provider)
 	log.Printf("Model: %s\n", model)
+	log.Printf("Total Messages: %d\n", len(messages))
+
+	prevCount := 0
+	if len(previousMsgCount) > 0 {
+		prevCount = previousMsgCount[0]
+	}
 
 	log.Println("---------- Request Messages ----------")
-	for i, msg := range messages {
+
+	// 只打印新增的消息，避免重复打印 system prompt
+	for i := prevCount; i < len(messages); i++ {
+		msg := messages[i]
 		content := msg.Content
+
+		// 对 system prompt 进行特殊处理，只显示摘要
+		if msg.Role == "system" {
+			if len(content) > 200 {
+				content = content[:200] + "...[已截断，长度:" + fmt.Sprintf("%d", len(content)) + "字符]"
+			}
+			log.Printf("[%d] Role: %s (长度:%d)\nContent: %s\n", i, msg.Role, len(messages[i].Content), content)
+			continue
+		}
+
+		// 对 tool 消息进行压缩显示
+		if msg.Role == "tool" {
+			if len(content) > 300 {
+				content = content[:300] + "...[已截断]"
+			}
+			log.Printf("[%d] Role: %s\nContent: %s\n", i, msg.Role, content)
+			continue
+		}
+
+		// 其他消息
 		if len(content) > 500 {
-			content = content[:500] + "...(truncated)"
+			content = content[:500] + "...[已截断]"
 		}
 		log.Printf("[%d] Role: %s\nContent: %s\n", i, msg.Role, content)
+
 		if len(msg.ToolCalls) > 0 {
 			log.Printf("ToolCalls: %+v\n", msg.ToolCalls)
 		}
+	}
+
+	// 如果有跳过的消息，给出提示
+	if prevCount > 0 {
+		log.Printf("[... 省略了前 %d 条已记录的消息 ...]\n", prevCount)
 	}
 
 	log.Println("---------- Response ----------")

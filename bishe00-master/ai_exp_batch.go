@@ -89,8 +89,8 @@ func aiGenPythonFromExpBatchHandler(w http.ResponseWriter, r *http.Request) {
 				default:
 				}
 
-				keyInfo := buildExpKeyInfo(req.TargetBaseURL, es)
 				py := generatePythonFromExpSpec(req.TargetBaseURL, es)
+				keyInfo := buildExpKeyInfo(req.TargetBaseURL, es)
 				if provider != nil {
 					tmp := genPythonWithProvider(provider, req.TargetBaseURL, es)
 					if strings.TrimSpace(tmp) != "" {
@@ -124,14 +124,10 @@ func aiGenPythonFromExpBatchHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func genPythonWithProvider(provider mcp.AIProvider, targetBaseURL string, spec ExpSpec) string {
-	keyInfo := buildExpKeyInfo(targetBaseURL, spec)
 	expJSON, _ := json.MarshalIndent(spec, "", "  ")
 	targetArgDesc := "--target(必填)"
-	targetUrlHint := "8) 构建请求URL时，请使用 urllib.parse.urljoin(target, path) 以正确处理相对路径，避免 'No scheme supplied' 错误。"
 	if targetBaseURL != "" {
-
 		targetArgDesc = fmt.Sprintf("--target(可选, 默认='%s')", targetBaseURL)
-		targetUrlHint = fmt.Sprintf("8) 已知目标地址为 '%s'，请在脚本中将其设为 --target 的默认值。构建请求URL时，请务必使用 urllib.parse.urljoin(target, path) 拼接地址，确保 scheme (http/https) 存在。如果用户提供的 target 不包含 scheme，请自动添加 http:// 前缀。", targetBaseURL)
 	}
 
 	systemPrompt := "你是一位专业的渗透测试开发者。你将根据给定的 EXP 规范生成可运行的 Python 利用脚本。请根据实际的漏洞特征生成通用的EXP，不要假设目标一定是特定框架。"
@@ -144,7 +140,6 @@ func genPythonWithProvider(provider mcp.AIProvider, targetBaseURL string, spec E
 6) 生成的脚本不得直接 print(response.text) 或输出整页 HTML。必须对回显做"去噪"处理。
 7) 实现 validate(status/bodyContains/headerContains)，并在命中时输出 "VULNERABLE" 与关键证据。
 8) 不依赖第三方库（除了 requests）。特别注意：禁止导入 readline 模块，以确保 Windows 兼容性。
-%s
 9) 【通用响应提取策略】无论目标是什么框架，执行命令后都需要从响应中提取命令输出。推荐策略：
    - 优先尝试定位响应中的特殊标记（如 NEONSCAN_BEGIN/NEONSCAN_END）
    - 如果没有标记，使用正则表达式截取 HTML 标签之前的内容：re.search(r"^(.*?)(?:<!DOCTYPE|<html|<!HTML)", resp.text, re.DOTALL|re.IGNORECASE)
@@ -173,7 +168,7 @@ func genPythonWithProvider(provider mcp.AIProvider, targetBaseURL string, spec E
 
 EXP JSON:
 %s
-`, targetArgDesc, targetUrlHint, keyInfo, string(expJSON))
+`, targetArgDesc, string(expJSON))
 
 	messages := []mcp.ChatMessage{
 		{Role: "system", Content: systemPrompt, Time: time.Now().Format(time.RFC3339)},

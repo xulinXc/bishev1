@@ -391,14 +391,7 @@ func parsePorts(spec string) []int {
 	for k := range set {
 		ports = append(ports, k)
 	}
-	// simple sort (could use sort.Ints for efficiency)
-	for i := 0; i < len(ports); i++ {
-		for j := i + 1; j < len(ports); j++ {
-			if ports[j] < ports[i] {
-				ports[i], ports[j] = ports[j], ports[i]
-			}
-		}
-	}
+	sort.Ints(ports)
 	return ports
 }
 
@@ -3231,12 +3224,15 @@ func aiAutoScanHandler(w http.ResponseWriter, r *http.Request) {
 
 			// 调用AI，获取下一步操作或分析
 			sendProgress(t, 5+iteration*2, "AI正在分析并决策下一步操作...")
+			msgCountBefore := len(messages)
 			response, toolCalls, err := aiProvider.Chat(messages, scanTools)
 			if err != nil {
 				log.Printf("[ERROR] AI调用失败: %v", err)
 				sendProgress(t, 0, fmt.Sprintf("AI调用失败: %v", err))
 				break
 			}
+			log.Printf("[AI调用] 第 %d 次调用，消息数量: %d -> %d, toolCalls: %d",
+				iteration, msgCountBefore, len(messages), len(toolCalls))
 			if len(toolCalls) > 0 {
 				// AI决定调用工具
 			}
@@ -3272,26 +3268,26 @@ func aiAutoScanHandler(w http.ResponseWriter, r *http.Request) {
 				// 只有在明确表示"扫描完成"或"分析完成"且没有发现漏洞时才结束
 				shouldEnd := false
 				responseLower := strings.ToLower(response)
-				
+
 				// 如果AI明确表示完成，且不是在描述漏洞或生成EXP
-				if (strings.Contains(responseLower, "扫描完成") || 
-				    strings.Contains(responseLower, "分析完成") ||
-				    strings.Contains(responseLower, "检测完成")) &&
-				   !strings.Contains(responseLower, "漏洞") &&
-				   !strings.Contains(responseLower, "exp") &&
-				   !strings.Contains(responseLower, "exploit") {
+				if (strings.Contains(responseLower, "扫描完成") ||
+					strings.Contains(responseLower, "分析完成") ||
+					strings.Contains(responseLower, "检测完成")) &&
+					!strings.Contains(responseLower, "漏洞") &&
+					!strings.Contains(responseLower, "exp") &&
+					!strings.Contains(responseLower, "exploit") {
 					shouldEnd = true
 				}
-				
+
 				// 如果AI返回的是漏洞分析或EXP代码，不要结束
 				if strings.Contains(responseLower, "漏洞描述") ||
-				   strings.Contains(responseLower, "exp代码") ||
-				   strings.Contains(responseLower, "exploit") ||
-				   strings.Contains(responseLower, "```python") ||
-				   strings.Contains(responseLower, "风险等级") {
+					strings.Contains(responseLower, "exp代码") ||
+					strings.Contains(responseLower, "exploit") ||
+					strings.Contains(responseLower, "```python") ||
+					strings.Contains(responseLower, "风险等级") {
 					shouldEnd = false
 				}
-				
+
 				if shouldEnd {
 					log.Printf("[INFO] AI表示扫描完成，准备生成最终报告")
 					break
@@ -3301,13 +3297,9 @@ func aiAutoScanHandler(w http.ResponseWriter, r *http.Request) {
 
 			// 处理AI的工具调用
 			if len(toolCalls) > 0 {
-				// 添加AI的工具调用到消息历史
-				messages = append(messages, mcp.ChatMessage{
-					Role:      "assistant",
-					Content:   response,
-					ToolCalls: toolCalls,
-					Time:      time.Now().Format(time.RFC3339),
-				})
+				// 注意：只添加工具调用结果，不添加AI的"思考总结"
+				// tool_calls 已经清楚地表明了AI的决策，不需要冗余的思考内容
+				// AI 下次调用时会根据 tool 结果决定下一步
 
 				// 执行AI调用的工具
 				for _, toolCall := range toolCalls {

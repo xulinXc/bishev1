@@ -26,68 +26,72 @@ type AIGenPythonFromExpReq struct {
 	TimeoutMs     int            `json:"timeoutMs"`
 	Exp           ExpSpec        `json:"exp"`
 	Verify        *ExpVerifyInfo `json:"verify,omitempty"`
-	AutoVerify    bool           `json:"autoVerify"`    // 是否启用自动验证
-	TargetURL     string         `json:"targetURL"`     // 用于自动验证的目标URL
-	MaxRetries    int            `json:"maxRetries"`    // 最大重试次数（默认5）
+	AutoVerify    bool           `json:"autoVerify"` // 是否启用自动验证
+	TargetURL     string         `json:"targetURL"`  // 用于自动验证的目标URL
+	MaxRetries    int            `json:"maxRetries"` // 最大重试次数（默认5）
 }
 
 type AIGenPythonFromExpResp struct {
 	Name           string   `json:"name"`
 	KeyInfo        string   `json:"keyInfo"`
 	Python         string   `json:"python"`
-	Verified       bool     `json:"verified"`        // 是否验证成功
-	VerifyAttempts int      `json:"verifyAttempts"`  // 验证尝试次数
-	VerifyLogs     []string `json:"verifyLogs"`      // 验证日志
-	Category       string   `json:"category"`        // 漏洞类型
+	Verified       bool     `json:"verified"`       // 是否验证成功
+	VerifyAttempts int      `json:"verifyAttempts"` // 验证尝试次数
+	VerifyLogs     []string `json:"verifyLogs"`     // 验证日志
+	Category       string   `json:"category"`       // 漏洞类型
 }
 
 func newAIProvider(providerName, apiKey, baseURL, model string) (mcp.AIProvider, error) {
+	trimSpace := func(s string) string { return strings.TrimSpace(s) }
+
+	var p mcp.AIProvider
+	var err error
+
 	switch providerName {
 	case "deepseek":
-		if strings.TrimSpace(apiKey) == "" {
+		if trimSpace(apiKey) == "" {
 			return nil, fmt.Errorf("API Key 不能为空")
 		}
-		p := mcp.NewDeepSeekProvider(apiKey)
-		if strings.TrimSpace(baseURL) != "" {
-			p.BaseURL = baseURL
-		}
-		if strings.TrimSpace(model) != "" {
-			p.Model = model
-		}
-		return p, nil
+		p = mcp.NewDeepSeekProvider(apiKey)
 	case "openai":
-		if strings.TrimSpace(apiKey) == "" {
+		if trimSpace(apiKey) == "" {
 			return nil, fmt.Errorf("API Key 不能为空")
 		}
-		p := mcp.NewOpenAIProvider(apiKey)
-		if strings.TrimSpace(baseURL) != "" {
-			p.BaseURL = baseURL
-		}
-		if strings.TrimSpace(model) != "" {
-			p.Model = model
-		}
-		return p, nil
+		p = mcp.NewOpenAIProvider(apiKey)
 	case "anthropic":
-		if strings.TrimSpace(apiKey) == "" {
+		if trimSpace(apiKey) == "" {
 			return nil, fmt.Errorf("API Key 不能为空")
 		}
-		p := mcp.NewAnthropicProvider(apiKey)
-		if strings.TrimSpace(baseURL) != "" {
-			p.BaseURL = baseURL
-		}
-		if strings.TrimSpace(model) != "" {
-			p.Model = model
-		}
-		return p, nil
+		p = mcp.NewAnthropicProvider(apiKey)
 	case "ollama":
-		p := mcp.NewOllamaProvider(baseURL, model)
-		if strings.TrimSpace(model) != "" {
-			p.Model = model
-		}
-		return p, nil
+		p = mcp.NewOllamaProvider(baseURL, model)
 	default:
 		return nil, fmt.Errorf("不支持的AI提供商")
 	}
+
+	// 通用设置
+	if baseURLProvider, ok := p.(*mcp.DeepSeekProvider); ok && trimSpace(baseURL) != "" {
+		baseURLProvider.BaseURL = trimSpace(baseURL)
+	}
+	if baseURLProvider, ok := p.(*mcp.OpenAIProvider); ok && trimSpace(baseURL) != "" {
+		baseURLProvider.BaseURL = trimSpace(baseURL)
+	}
+	if baseURLProvider, ok := p.(*mcp.AnthropicProvider); ok && trimSpace(baseURL) != "" {
+		baseURLProvider.BaseURL = trimSpace(baseURL)
+	}
+	if trimSpace(model) != "" {
+		switch provider := p.(type) {
+		case *mcp.DeepSeekProvider:
+			provider.Model = trimSpace(model)
+		case *mcp.OpenAIProvider:
+			provider.Model = trimSpace(model)
+		case *mcp.AnthropicProvider:
+			provider.Model = trimSpace(model)
+		case *mcp.OllamaProvider:
+			provider.Model = trimSpace(model)
+		}
+	}
+	return p, err
 }
 
 func stripCodeFence(s string) string {
@@ -108,7 +112,7 @@ func stripCodeFence(s string) string {
 // getSystemPromptForCategory 根据漏洞类型返回专用的系统提示词
 func getSystemPromptForCategory(category VulnCategory) string {
 	basePrompt := "你是一位专业的渗透测试开发者。你将根据给定的 EXP 规范生成可运行的 Python 利用脚本。"
-	
+
 	switch category {
 	case CatCommandInjection, CatCodeExecution:
 		return basePrompt + "\n\n你正在处理一个命令执行/代码执行类型的漏洞。重点关注：\n" +
@@ -295,7 +299,7 @@ func aiGenPythonFromExpHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("\n========== 启动自动验证流程 ==========")
 		logChan := make(chan string, 100)
 		var logs []string
-		
+
 		// 启动日志收集协程
 		go func() {
 			for log := range logChan {
