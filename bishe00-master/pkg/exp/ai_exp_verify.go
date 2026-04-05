@@ -112,6 +112,9 @@ func GenerateExpWithVerification(
 		fmt.Println(msg)
 	}
 
+	// 保存原始AI代码用于修正
+	rawAICode := ""
+
 	// 1. 使用模板生成基础代码
 	baseCode := generatePythonFromExpSpec(targetURL, spec)
 	log("[生成] 模板代码生成完成，长度: %d", len(baseCode))
@@ -119,7 +122,8 @@ func GenerateExpWithVerification(
 	// 2. 如果有 provider，使用 AI 生成更好的代码
 	if provider != nil {
 		log("[AI] 正在请求 AI 生成改进代码...")
-		aiCode := requestExpFromAI(provider, spec, log)
+		aiCode, rawCode := requestExpFromAI(provider, spec, log)
+		rawAICode = rawCode // 保存原始代码
 		if aiCode != "" {
 			baseCode = aiCode
 			log("[AI] AI 代码生成成功，长度: %d", len(aiCode))
@@ -142,7 +146,7 @@ func GenerateExpWithVerification(
 	}
 
 	log("[验证] 开始验证流程...")
-	finalCode, verifyErr := GenerateAndVerifyExp(config, provider, logChan)
+	finalCode, verifyErr := GenerateAndVerifyExp(config, rawAICode, provider, logChan)
 	if verifyErr != nil {
 		log("[验证] 验证失败: %v", verifyErr)
 		return baseCode, false, verifyErr
@@ -152,7 +156,8 @@ func GenerateExpWithVerification(
 }
 
 // requestExpFromAI 请求 AI 生成 EXP 代码
-func requestExpFromAI(provider mcp.AIProvider, spec ExpSpec, log func(string, ...interface{})) string {
+// 返回 (处理后代码, 原始代码)
+func requestExpFromAI(provider mcp.AIProvider, spec ExpSpec, log func(string, ...interface{})) (string, string) {
 	category := DetectVulnCategory(spec)
 	keyInfo := buildExpKeyInfo("", spec)
 
@@ -172,21 +177,24 @@ func requestExpFromAI(provider mcp.AIProvider, spec ExpSpec, log func(string, ..
 		if log != nil {
 			log("[AI] AI 请求失败: %v", err)
 		}
-		return ""
+		return "", ""
 	}
+
+	// 保存原始内容用于修正
+	rawCode := content
 
 	clean := stripCodeFence(content)
 	if clean == "" {
 		if log != nil {
 			log("[AI] AI 返回为空")
 		}
-		return ""
+		return "", rawCode
 	}
 
-	return clean
+	return clean, rawCode
 }
 
-func GenerateAndVerifyExp(config ExpVerifyConfig, provider mcp.AIProvider, logChan chan<- string) (string, error) {
+func GenerateAndVerifyExp(config ExpVerifyConfig, rawAICode string, provider mcp.AIProvider, logChan chan<- string) (string, error) {
 	log := func(format string, args ...interface{}) {
 		msg := fmt.Sprintf(format, args...)
 		logChan <- msg
@@ -209,6 +217,9 @@ func GenerateAndVerifyExp(config ExpVerifyConfig, provider mcp.AIProvider, logCh
 	}
 
 	currentCode := config.PythonCode
+
+	// 用于发送给AI修正的原始代码（只在第一次修正时使用）
+	codeToCorrect := rawAICode
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		log("")
@@ -258,7 +269,12 @@ func GenerateAndVerifyExp(config ExpVerifyConfig, provider mcp.AIProvider, logCh
 		failureReason := analyzeFailure(result, category, log)
 
 		log("[分析] 开始构建修正提示词...")
-		correctionPrompt := buildCorrectionPrompt(config.ExpSpec, currentCode, failureReason, category, testCmd, result, log)
+		// 使用原始AI代码进行修正，而不是经过处理的代码
+		codeToFix := codeToCorrect
+		if codeToFix == "" {
+			codeToFix = currentCode // 如果没有原始代码，使用当前代码
+		}
+		correctionPrompt := buildCorrectionPrompt(config.ExpSpec, codeToFix, failureReason, category, testCmd, result, log)
 
 		log("[AI] 请求AI生成修正版本...")
 		correctedCode := requestExpCorrection(provider, correctionPrompt, log)
