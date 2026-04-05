@@ -3308,9 +3308,13 @@ func aiAutoScanHandler(w http.ResponseWriter, r *http.Request) {
 
 			// 处理AI的工具调用
 			if len(toolCalls) > 0 {
-				// 注意：只添加工具调用结果，不添加AI的"思考总结"
-				// tool_calls 已经清楚地表明了AI的决策，不需要冗余的思考内容
-				// AI 下次调用时会根据 tool 结果决定下一步
+				// 添加 assistant 消息（包含 tool_calls），DeepSeek API 要求 tool 消息必须引用对应的 tool_calls
+				messages = append(messages, mcp.ChatMessage{
+					Role:      "assistant",
+					Content:   response,
+					ToolCalls: toolCalls,
+					Time:      time.Now().Format(time.RFC3339),
+				})
 
 				// 执行AI调用的工具
 				for _, toolCall := range toolCalls {
