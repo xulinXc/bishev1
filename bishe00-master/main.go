@@ -3265,27 +3265,38 @@ func aiAutoScanHandler(w http.ResponseWriter, r *http.Request) {
 				})
 
 				// 检查是否应该结束循环
-				// 只有在明确表示"扫描完成"或"分析完成"且没有发现漏洞时才结束
+				// 当AI返回的内容主要是最终报告/总结时结束
 				shouldEnd := false
 				responseLower := strings.ToLower(response)
 
-				// 如果AI明确表示完成，且不是在描述漏洞或生成EXP
-				if (strings.Contains(responseLower, "扫描完成") ||
+				// 如果AI明确表示完成（使用了明确的结束语）
+				hasEndPhrase := strings.Contains(responseLower, "扫描完成") ||
 					strings.Contains(responseLower, "分析完成") ||
-					strings.Contains(responseLower, "检测完成")) &&
-					!strings.Contains(responseLower, "漏洞") &&
-					!strings.Contains(responseLower, "exp") &&
-					!strings.Contains(responseLower, "exploit") {
-					shouldEnd = true
-				}
+					strings.Contains(responseLower, "检测完成") ||
+					strings.Contains(responseLower, "总结") ||
+					strings.Contains(responseLower, "报告已生成")
 
-				// 如果AI返回的是漏洞分析或EXP代码，不要结束
-				if strings.Contains(responseLower, "漏洞描述") ||
+				// 如果AI在提供EXP或漏洞详情，说明还在分析中
+				isProvidingDetails := strings.Contains(responseLower, "漏洞描述") ||
 					strings.Contains(responseLower, "exp代码") ||
 					strings.Contains(responseLower, "exploit") ||
 					strings.Contains(responseLower, "```python") ||
-					strings.Contains(responseLower, "风险等级") {
-					shouldEnd = false
+					strings.Contains(responseLower, "风险等级") ||
+					strings.Contains(responseLower, "修复建议") ||
+					strings.Contains(responseLower, "利用方法")
+
+				// 统计response中换行和字符数，判断是否是长篇总结
+				newlineCount := strings.Count(response, "\n")
+				isLongSummary := len(response) > 500 && newlineCount > 10
+
+				// 如果AI表示完成，且不是在详细描述漏洞/EXP，且是长篇总结，则结束
+				if hasEndPhrase && !isProvidingDetails && isLongSummary {
+					shouldEnd = true
+				}
+
+				// 另一个结束条件：发现了漏洞且AI返回了漏洞详情
+				if hasEndPhrase && isProvidingDetails && isLongSummary && strings.Contains(responseLower, "thinkphp") {
+					shouldEnd = true
 				}
 
 				if shouldEnd {
@@ -4468,8 +4479,8 @@ func executeAITool(toolCall mcp.AIToolCall, defaultTarget, defaultPorts string, 
 
 // generateFinalSummary 生成最终总结，包括EXP生成
 func generateFinalSummary(allResults map[string]interface{}, aiAnalysisSteps []map[string]interface{}) string {
-	summary := "扫描完成。\n\n"
-	summary += "扫描结果摘要：\n"
+	summary := "# 安全扫描报告\n\n"
+	summary += "## 扫描结果摘要\n"
 
 	if portScan, ok := allResults["portScan"].(map[string]interface{}); ok {
 		if results, ok := portScan["results"].([]map[string]interface{}); ok {
@@ -4495,10 +4506,14 @@ func generateFinalSummary(allResults map[string]interface{}, aiAnalysisSteps []m
 		}
 	}
 
-	summary += "\nAI分析步骤：\n"
-	for i, step := range aiAnalysisSteps {
-		if stepName, ok := step["step"].(string); ok {
-			summary += fmt.Sprintf("%d. %s\n", i+1, stepName)
+	// 只保留最后一个 AI 分析内容作为最终报告
+	if len(aiAnalysisSteps) > 0 {
+		for i := len(aiAnalysisSteps) - 1; i >= 0; i-- {
+			if content, ok := aiAnalysisSteps[i]["content"].(string); ok && content != "" && len(content) > 200 {
+				summary += "\n## AI 安全分析\n\n"
+				summary += content
+				break
+			}
 		}
 	}
 
