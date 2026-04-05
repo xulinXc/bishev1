@@ -111,18 +111,37 @@ func newAIProvider(providerName, apiKey, baseURL, model string, timeoutSec ...in
 }
 
 func stripCodeFence(s string) string {
+	original := s
 	s = strings.TrimSpace(s)
+
+	// 记录原始长度用于调试
+	debugLog := func(msg string) {
+		fmt.Printf("[stripCodeFence] %s (原始长度: %d, 处理后长度: %d)\n", msg, len(original), len(s))
+	}
 
 	// 去除 markdown 代码围栏
 	if strings.HasPrefix(s, "```") {
 		lines := strings.Split(s, "\n")
-		if len(lines) >= 3 {
-			lines = lines[1:]
-			if strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
-				lines = lines[:len(lines)-1]
+		if len(lines) >= 2 {
+			// 第一行是 ```python 或 ```，跳过
+			firstLine := strings.TrimSpace(lines[0])
+			if len(lines) >= 3 && (firstLine == "```" || strings.HasPrefix(firstLine, "```python") || strings.HasPrefix(firstLine, "```py")) {
+				lines = lines[1:]
+			}
+			// 最后一行可能是 ```
+			lastIdx := len(lines) - 1
+			if lastIdx > 0 && strings.TrimSpace(lines[lastIdx]) == "```" {
+				lines = lines[:lastIdx]
 			}
 			s = strings.TrimSpace(strings.Join(lines, "\n"))
 		}
+		debugLog("去除markdown围栏后")
+	}
+
+	// 如果整个字符串被一对双引号包裹，去掉它们
+	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") && !strings.Contains(s[1:len(s)-1], "\"") {
+		s = s[1 : len(s)-1]
+		debugLog("去除外部引号后")
 	}
 
 	// 替换中文引号为英文引号
@@ -134,19 +153,32 @@ func stripCodeFence(s string) string {
 	).Replace(s)
 
 	// 去除任何残留的 markdown 或解释性文本
-	// 如果第一行看起来不像 Python 代码（包含中文或特殊字符），尝试找到第一个看起来像代码的行
 	lines := strings.Split(s, "\n")
 	resultLines := make([]string, 0)
-	for _, line := range lines {
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
+
 		// 如果这行是空的，跳过
 		if trimmed == "" {
 			continue
 		}
+
+		// 如果这行只是 Markdown 标记（如 **, ##, -, * 等），跳过
+		if strings.HasPrefix(trimmed, "**") && strings.HasSuffix(trimmed, "**") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "##") || strings.HasPrefix(trimmed, "# ") {
+			continue
+		}
+		if trimmed == "-" || trimmed == "*" || trimmed == "---" {
+			continue
+		}
+
 		// 如果这行只是注释，跳过
 		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
+
 		// 检查是否包含非ASCII字符（非英文）
 		hasNonASCII := false
 		for _, r := range trimmed {
@@ -155,15 +187,19 @@ func stripCodeFence(s string) string {
 				break
 			}
 		}
-		// 如果包含非ASCII字符，不使用这行及之前的所有行
+
+		// 如果包含非ASCII字符，跳过这行（而不是跳过之后的所有行）
 		if hasNonASCII {
+			fmt.Printf("[stripCodeFence] 跳过第%d行（包含非ASCII字符）: %s\n", i+1, trimmed[:min(len(trimmed), 30)])
 			continue
 		}
+
 		resultLines = append(resultLines, line)
 	}
 
 	if len(resultLines) > 0 {
 		s = strings.TrimSpace(strings.Join(resultLines, "\n"))
+		debugLog("去除非ASCII后")
 	}
 
 	return s

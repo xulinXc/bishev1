@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"bishe/internal/mcp"
@@ -309,11 +310,9 @@ func aiGenPythonFromExpHandler(w http.ResponseWriter, r *http.Request) {
 	req.TargetBaseURL = strings.TrimSpace(req.TargetBaseURL)
 	keyInfo := buildExpKeyInfo(req.TargetBaseURL, req.Exp)
 
-	// 检测漏洞类型
 	category := DetectVulnCategory(req.Exp)
 	fmt.Printf("[分类] 漏洞类型: %s\n", category)
 
-	// 没有 provider 时，只生成模板代码
 	providerName := strings.TrimSpace(req.Provider)
 	if providerName == "" || req.APIKey == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -338,17 +337,41 @@ func aiGenPythonFromExpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 设置日志通道
+	// 设置 SSE 响应头
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
 	logChan := make(chan string, 100)
 	var logs []string
+	var logsMu sync.Mutex
+
+	// 实时发送日志到前端
 	go func() {
 		for log := range logChan {
+			logsMu.Lock()
 			logs = append(logs, log)
+			logsMu.Unlock()
+
+			// 实时发送
+			data, _ := json.Marshal(map[string]interface{}{
+				"type":    "log",
+				"content": log,
+			})
+			fmt.Fprintf(w, "data: %s\n\n", string(data))
+			flusher.Flush()
 		}
 	}()
 
-	// 使用统一生成验证函数
 	fmt.Println("\n========== 启动 EXP 生成和验证流程 ==========")
+
 	maxRetries := req.MaxRetries
 	if maxRetries <= 0 {
 		maxRetries = 3
@@ -378,19 +401,19 @@ func aiGenPythonFromExpHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 重新构建 keyInfo（因为 GenerateExpWithVerification 内部没有返回它）
 	keyInfo = buildExpKeyInfo(targetURL, req.Exp)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(AIGenPythonFromExpResp{
-		Name:           req.Exp.Name,
-		KeyInfo:        keyInfo,
-		Python:         finalCode,
-		Verified:       verified,
-		VerifyAttempts: attempts,
-		VerifyLogs:     logs,
-		Category:       category.String(),
+	data, _ := json.Marshal(map[string]interface{}{
+		"type":     "result",
+		"name":     req.Exp.Name,
+		"keyInfo":  keyInfo,
+		"python":   finalCode,
+		"verified": verified,
+		"attempts": attempts,
+		"category": category.String(),
 	})
+	fmt.Fprintf(w, "data: %s\n\n", string(data))
+	flusher.Flush()
 }
 
 func generatePythonFromExpSpec(targetBaseURL string, spec ExpSpec) string {
