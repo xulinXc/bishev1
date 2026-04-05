@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"bishe/internal/mcp"
 )
@@ -40,7 +41,7 @@ type AIGenPythonFromExpResp struct {
 	Category       string   `json:"category"`       // 漏洞类型
 }
 
-func newAIProvider(providerName, apiKey, baseURL, model string) (mcp.AIProvider, error) {
+func newAIProvider(providerName, apiKey, baseURL, model string, timeoutSec ...int) (mcp.AIProvider, error) {
 	trimSpace := func(s string) string { return strings.TrimSpace(s) }
 
 	var p mcp.AIProvider
@@ -90,6 +91,22 @@ func newAIProvider(providerName, apiKey, baseURL, model string) (mcp.AIProvider,
 			provider.Model = trimSpace(model)
 		}
 	}
+
+	// 设置超时
+	if len(timeoutSec) > 0 && timeoutSec[0] > 0 {
+		timeout := time.Duration(timeoutSec[0]) * time.Second
+		switch provider := p.(type) {
+		case *mcp.DeepSeekProvider:
+			provider.SetTimeout(timeout)
+		case *mcp.OpenAIProvider:
+			provider.SetTimeout(timeout)
+		case *mcp.AnthropicProvider:
+			provider.SetTimeout(timeout)
+		case *mcp.OllamaProvider:
+			provider.SetTimeout(timeout)
+		}
+	}
+
 	return p, err
 }
 
