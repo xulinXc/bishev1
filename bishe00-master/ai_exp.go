@@ -119,7 +119,8 @@ func getSystemPromptForCategory(category VulnCategory) string {
 			"1. 使用 echo NEONSCAN_BEGIN; <命令>; echo NEONSCAN_END 包裹命令\n" +
 			"2. 准确提取 NEONSCAN_BEGIN 和 NEONSCAN_END 之间的输出\n" +
 			"3. 支持交互式Shell模式\n" +
-			"4. 处理各种命令输出格式（纯文本、HTML包裹等）"
+			"4. 处理各种命令输出格式（纯文本、HTML包裹等）\n" +
+			"5. 【重要】验证成功时必须输出 'VULNERABLE'（大写），不要使用其他标记"
 	case CatFileUpload:
 		return basePrompt + "\n\n你正在处理一个文件上传类型的漏洞。重点关注：\n" +
 			"1. 正确构造multipart/form-data请求\n" +
@@ -165,7 +166,7 @@ func buildUserPromptForCategory(category VulnCategory, targetBaseURL string, exp
 3) 命令行参数必须同时支持：%s、--timeout(可选)。
 4) 严格按 EXP steps 顺序发包，支持 {{var}} 占位符替换与变量提取（bodyRegex/headerRegex）。
 5) 生成的脚本不得直接 print(response.text) 或输出整页 HTML。必须对回显做"去噪"处理。
-6) 实现 validate(status/bodyContains/headerContains)，并在命中时输出 "VULNERABLE" 与关键证据。
+6) 【重要】实现 validate(status/bodyContains/headerContains)，并在命中时输出 "VULNERABLE"（大写，不要使用其他标记如ThinkPHP_RCE_Vulnerable）。
 7) 不依赖第三方库（除了 requests）。特别注意：禁止导入 readline 模块，以确保 Windows 兼容性。
 8) %s
 9) 【关键执行日志】在脚本中增加详细的执行日志，打印关键步骤：
