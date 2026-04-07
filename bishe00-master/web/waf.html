@@ -31,19 +31,26 @@
         <label>基础URL<input id="wf-base" value="http://localhost:8888" placeholder="https://target.com"/></label>
         <label>路径<input id="wf-path" value="/search" placeholder="/api/search"/></label>
         <label>方法(逗号分隔)<input id="wf-methods" value="GET,POST" placeholder="GET,POST"/></label>
-        <label>Payload类型<select id="wf-type"><option value="all" selected>SQLi+XSS(全部)</option><option value="sqli">SQL注入</option><option value="xss">XSS</option></select></label>
-        <label>策略(逗号分隔)<input id="wf-strategies" value="case,urlencode,doubleencode,space2comment,split,htmlentity" placeholder="case,urlencode,doubleencode,space2comment,split,htmlentity"/></label>
+        <label>Payload类型
+          <select id="wf-type">
+            <option value="all" selected>全部（自动过滤）</option>
+            <option value="sqli">SQL注入专项</option>
+            <option value="xss">XSS跨站脚本专项</option>
+          </select>
+        </label>
+        <label>策略(逗号分隔)<input id="wf-strategies" value="" placeholder="留空则自动选择"/></label>
         <label>匹配文本(可选)<input id="wf-match" placeholder="success"/></label>
       </div>
       <div class="btn-row">
-        <button id="wf-preset-case" class="btn btn-ghost">预设：大小写</button>
-        <button id="wf-preset-enc" class="btn btn-ghost">预设：编码</button>
-        <button id="wf-preset-mix" class="btn btn-ghost">预设：混合</button>
+        <button id="wf-preset-case" class="btn btn-ghost">大小写混淆</button>
+        <button id="wf-preset-enc" class="btn btn-ghost">编码变形</button>
+        <button id="wf-preset-comment" class="btn btn-ghost">注释混淆</button>
+        <button id="wf-preset-sql" class="btn btn-ghost">SQL专用</button>
+        <button id="wf-preset-xss" class="btn btn-ghost">XSS专用</button>
+        <button id="wf-preset-all" class="btn btn-ghost">全策略</button>
       </div>
-      <label>Payload 列表（每行一个）<textarea id="wf-payloads" rows="6" placeholder="q=test
-q=1 OR 1=1">q=test
-q=1 OR 1=1
-q=&lt;script&gt;alert(1)&lt;/script&gt;</textarea></label>
+      <label>Payload 列表（每行一个，为空则使用内置Payload库）<textarea id="wf-payloads" rows="6" placeholder="留空则根据类型自动选择内置Payload库
+可手动输入自定义Payload"></textarea></label>
       <div class="grid">
         <label>并发<div class="number-input-wrapper"><input id="wf-conc" type="number" value="10"/><div class="number-steppers"><div class="number-stepper" onclick="adjustNumber('wf-conc', 5)">▲</div><div class="number-stepper" onclick="adjustNumber('wf-conc', -5)">▼</div></div></div></label>
         <label>超时(毫秒)<div class="number-input-wrapper"><input id="wf-timeout" type="number" value="4000"/><div class="number-steppers"><div class="number-stepper" onclick="adjustNumber('wf-timeout', 500)">▲</div><div class="number-stepper" onclick="adjustNumber('wf-timeout', -500)">▼</div></div></div></label>

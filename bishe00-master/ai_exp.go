@@ -167,7 +167,11 @@ func buildUserPromptForCategory(category VulnCategory, targetBaseURL string, exp
 4) 严格按 EXP steps 顺序发包，支持 {{var}} 占位符替换与变量提取（bodyRegex/headerRegex）。
 5) 生成的脚本不得直接 print(response.text) 或输出整页 HTML。必须对回显做"去噪"处理。
 6) 【重要】实现 validate(status/bodyContains/headerContains)，并在命中时输出 "VULNERABLE"（大写，不要使用其他标记如ThinkPHP_RCE_Vulnerable）。
-7) 不依赖第三方库（除了 requests）。特别注意：禁止导入 readline 模块，以确保 Windows 兼容性。
+7) 【Windows兼容要求-必须遵守】禁止导入任何第三方库（除了 requests）。特别禁止：
+   - 禁止 import readline（Windows 不支持）
+   - 禁止 import readline（Unix only功能）
+   - 禁止 import rlcompleter（Windows 不支持）
+   - 禁止任何依赖系统C库的模块
 8) %s
 9) 【关键执行日志】在脚本中增加详细的执行日志，打印关键步骤：
    [INFO] Target: ...

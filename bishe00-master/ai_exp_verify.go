@@ -571,7 +571,13 @@ func analyzeFailure(result ExpVerifyResult, category VulnCategory, log func(stri
 	if strings.Contains(result.Error, "No module named") {
 		re := regexp.MustCompile(`No module named '(.+?)'`)
 		if matches := re.FindStringSubmatch(result.Error); len(matches) > 1 {
-			reasons = append(reasons, fmt.Sprintf("缺少Python模块: %s，需要添加导入或安装", matches[1]))
+			moduleName := matches[1]
+			// 特别处理 readline 模块（Windows 不支持）
+			if moduleName == "readline" {
+				reasons = append(reasons, "【致命错误】代码导入了 readline 模块，但该模块在 Windows 上不可用。必须移除所有 readline 相关的导入和功能。")
+			} else {
+				reasons = append(reasons, fmt.Sprintf("缺少Python模块: %s，需要添加导入或安装", moduleName))
+			}
 		} else {
 			reasons = append(reasons, "缺少必需的Python模块")
 		}
@@ -771,6 +777,17 @@ func buildCorrectionPrompt(expSpec ExpSpec, currentCode, failureReason string, c
 		prompt.WriteString("- 确保导入了所有需要的模块\n\n")
 	}
 
+	// 特别处理 readline 模块错误（Windows 不支持）
+	if strings.Contains(result.Error, "No module named 'readline'") || strings.Contains(failureReason, "readline") {
+		prompt.WriteString("【致命错误修复】readline 模块问题（Windows 不支持）：\n")
+		prompt.WriteString("- 立即删除所有 `import readline` 语句\n")
+		prompt.WriteString("- 如果代码中有 readline 相关的功能（如 shell 模式的输入），必须完全移除\n")
+		prompt.WriteString("- 示例修复：\n")
+		prompt.WriteString("  # 删除这一行：\n")
+		prompt.WriteString("  # import readline\n\n")
+		prompt.WriteString("  # 如果 --shell 模式使用了 readline，直接删除该功能，保留 --cmd 单命令模式\n\n")
+	}
+
 	// 通用要求
 	prompt.WriteString("【通用要求】\n")
 	prompt.WriteString("3. 添加必要的导入语句（requests, re, sys, argparse等）\n")
@@ -792,6 +809,15 @@ func buildCorrectionPrompt(expSpec ExpSpec, currentCode, failureReason string, c
 
 func tryAlternativeFix(currentCode string, result ExpVerifyResult, category VulnCategory, testCmd string, log func(string, ...interface{})) string {
 	log("[备用修复] 尝试自动修复...")
+
+	// 修复 readline 模块错误（Windows 不支持）
+	if strings.Contains(result.Error, "No module named 'readline'") {
+		log("[备用修复] 检测到 readline 模块错误，尝试自动移除...")
+		fixed := removeReadlineImport(currentCode, log)
+		if fixed != currentCode {
+			return fixed
+		}
+	}
 
 	// 修复URL格式问题
 	if strings.Contains(result.Error, "No connection adapters") ||
@@ -938,6 +964,41 @@ func fixSyntaxError(code string, log func(string, ...interface{})) string {
 	fixed := strings.Join(fixedLines, "\n")
 	if fixed != code {
 		log("[备用修复] 已修复语法问题")
+	}
+	return fixed
+}
+
+// removeReadlineImport 移除 readline 模块导入（Windows 不支持）
+func removeReadlineImport(code string, log func(string, ...interface{})) string {
+	lines := strings.Split(code, "\n")
+	var fixedLines []string
+	removed := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// 检测并移除 readline 导入
+		if strings.Contains(trimmed, "import readline") || strings.HasPrefix(trimmed, "import readline;") {
+			if !strings.HasPrefix(trimmed, "#") { // 跳过注释行
+				removed = true
+				log("[备用修复] 已移除: %s", strings.TrimSpace(line))
+				continue
+			}
+		}
+		// 同时移除使用 readline 的代码块（如 if readline: 等）
+		if strings.Contains(trimmed, "readline.") && !strings.HasPrefix(trimmed, "#") {
+			// 检查是否是简单的 readline 调用，如果是则移除
+			if strings.Contains(trimmed, "readline.get") || strings.Contains(trimmed, "readline.set") {
+				removed = true
+				log("[备用修复] 已移除 readline 调用: %s", strings.TrimSpace(line))
+				continue
+			}
+		}
+		fixedLines = append(fixedLines, line)
+	}
+
+	fixed := strings.Join(fixedLines, "\n")
+	if removed {
+		log("[备用修复] 已移除 readline 模块导入和相关调用")
 	}
 	return fixed
 }
