@@ -109,15 +109,15 @@ function downloadText(filename, text, mime){
 const pendingBindings = {}
 window.pendingBindings = window.pendingBindings || pendingBindings
 window.__bindings = window.__bindings || {}
-const bind = (id, fn) => { 
+const bind = function(id, fn) {
   pendingBindings[id] = fn
   window.__bindings[id] = fn
-  const el = document.getElementById(id); 
+  var el = window.document ? window.document.getElementById(id) : null
   if(el) {
-    el.onclick = fn;
-    console.log(`Button ${id} bound successfully`);
+    el.onclick = fn
+    console.log('Button ' + id + ' bound successfully')
   } else {
-    console.warn(`Button ${id} not found, saved for later binding`);
+    console.warn('Button ' + id + ' not found, saved for later binding')
   }
 }
 
@@ -797,17 +797,28 @@ bind('wf-preset-all', () => {
   if (p) p.value = ''
 })
 
-bind('wf-start', async () => {
-  const baseUrl = document.getElementById('wf-base')?.value.trim()
-  const path = document.getElementById('wf-path')?.value.trim()
-  const payloadType = document.getElementById('wf-type')?.value || 'all'
-  const methods = document.getElementById('wf-methods')?.value.split(',').map(s => s.trim()).filter(Boolean)
-  const strategiesInput = document.getElementByById('wf-strategies')?.value.trim()
-  const strategies = strategiesInput ? strategiesInput.split(',').map(s => s.trim()).filter(Boolean) : []
-  const match = document.getElementById('wf-match')?.value.trim()
-  const userPayloads = document.getElementById('wf-payloads')?.value.split('\n').map(s => s.trim()).filter(Boolean)
-  const concurrency = parseInt(document.getElementById('wf-conc')?.value) || 50
-  const timeoutMs = parseInt(document.getElementById('wf-timeout')?.value) || 4000
+bind('wf-start', async function() {
+  var doc = window.document
+  var baseUrl = doc.getElementById('wf-base')
+  var path = doc.getElementById('wf-path')
+  var payloadType = doc.getElementById('wf-type')
+  var methodsEl = doc.getElementById('wf-methods')
+  var strategiesEl = doc.getElementById('wf-strategies')
+  var matchEl = doc.getElementById('wf-match')
+  var payloadsEl = doc.getElementById('wf-payloads')
+  var concEl = doc.getElementById('wf-conc')
+  var timeoutEl = doc.getElementById('wf-timeout')
+
+  baseUrl = baseUrl ? baseUrl.value.trim() : ''
+  path = path ? path.value.trim() : ''
+  payloadType = payloadType ? (payloadType.value || 'all') : 'all'
+  methods = methodsEl ? methodsEl.value.split(',').map(function(s) { return s.trim() }).filter(Boolean) : []
+  var strategiesInput = strategiesEl ? strategiesEl.value.trim() : ''
+  var strategies = strategiesInput ? strategiesInput.split(',').map(function(s) { return s.trim() }).filter(Boolean) : []
+  var match = matchEl ? matchEl.value.trim() : ''
+  var userPayloads = payloadsEl ? payloadsEl.value.split('\n').map(function(s) { return s.trim() }).filter(Boolean) : []
+  var concurrency = concEl ? (parseInt(concEl.value) || 50) : 50
+  var timeoutMs = timeoutEl ? (parseInt(timeoutEl.value) || 4000) : 4000
 
   if (!baseUrl || !path) {
     alert('请填写基础URL和路径')
