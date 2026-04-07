@@ -1534,8 +1534,10 @@ function renderSectionContent(sectionKey, sectionEl) {
         rightContent = `<span class="badge">${result.status}</span>${result.title ? `<span>${result.title}</span>` : ''}`
         break
       case 'wafScan':
-        leftContent = `<div class="result-icon success"></div><span>${result.method} ${result.payload}</span>`
-        rightContent = `<span class="code">${result.variant}</span><span class="badge">${result.status}</span>`
+        const variantEscaped = (result.variant || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        const payloadEscaped = (result.payload || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        leftContent = `<div class="result-icon success"></div><span>${result.method} ${payloadEscaped}</span>`
+        rightContent = `<span class="code">${variantEscaped}</span><span class="badge">${result.status}</span>`
         break
       case 'shoujiScan':
         const kindBadge = result.kind === 'js' ? 'js' : (result.kind === 'api' ? 'api' : 'other')
