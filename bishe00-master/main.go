@@ -4831,7 +4831,26 @@ func generatePythonScriptsForVulnerabilities(allResults map[string]interface{}) 
 			}
 		}
 
+		// 提前获取name用于后续漏洞类型检测
 		name := strings.TrimSpace(toStr(r["poc"]))
+
+		// Log4j2: 检测 JNDI 注入 (${jndi:ldap://...} 或 ${jndi:rmi://...})
+		log4j2Re := regexp.MustCompile(`\$\{[^}]*jndi:[^}]*\}`)
+		if strings.Contains(strings.ToLower(name), "log4j") || log4j2Re.MatchString(body) || log4j2Re.MatchString(path) {
+			if !strings.Contains(body, "{{jndi}}") && !strings.Contains(path, "{{jndi}}") {
+				body = log4j2Re.ReplaceAllString(body, "{{jndi}}")
+				path = log4j2Re.ReplaceAllString(path, "{{jndi}}")
+			}
+		}
+
+		// Struts2: 检测 command 执行 (action?command= 或 struts.action)
+		strutsRe := regexp.MustCompile(`command=([^&]*)`)
+		if strings.Contains(strings.ToLower(name), "struts") || strings.Contains(strings.ToLower(path), "struts") {
+			if !strings.Contains(path, "{{command}}") && !strings.Contains(body, "{{command}}") {
+				path = strutsRe.ReplaceAllString(path, "command={{command}}")
+			}
+		}
+
 		if name == "" {
 			name = "Generated EXP"
 		}
